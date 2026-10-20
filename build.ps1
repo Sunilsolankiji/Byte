@@ -25,7 +25,7 @@ try {
         $report = Join-Path $PSScriptRoot 'artifacts\native-smoke.json'
         if (Test-Path $report) { Remove-Item -LiteralPath $report }
         $app = Start-Process '.\dist\Byte\Byte.exe' -ArgumentList @('--smoke-test', ('"' + $report + '"')) -PassThru
-        if (!$app.WaitForExit(60000)) {
+        if (!$app.WaitForExit(90000)) {
             Stop-Process -Id $app.Id
             throw 'Native smoke tests timed out. Quit other running instances of Byte, then retry.'
         }

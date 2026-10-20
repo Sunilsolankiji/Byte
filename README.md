@@ -4,6 +4,32 @@ A quiet, local-only terminal robot that lives on the Windows desktop. Original
 procedural vector art, mint phosphor eyes, tiny boots, and a floating antenna.
 No account, cloud, LLM, telemetry, ads, or downloaded art.
 
+## Meet the friends
+
+There are now three original vector companions: **Byte**, the mint terminal
+robot; **Pip**, a peach-colored terminal cat with ears, whiskers and a curling
+tail; and **Orbit**, a lavender space explorer with an orbiting satellite and
+little flying-saucer rim.
+
+Use the tray's **Character** submenu to choose your solo character, or click a
+character and choose **Switch character** to cycle through them. **Friends
+together (all three)** toggles between one selected character and all three on
+the desktop at once. The same toggle is in each interaction bubble and
+Preferences. Choices persist locally; existing installations remain in solo
+mode until you enable friends.
+
+In together mode, friends roam independently and occasionally approach one
+another, wave, high-five, or build code blocks while a friend cheers them on.
+**Automatic friend interactions** can be disabled without hiding the friends.
+These scenes are silent, bounded to one monitor, and cancel immediately for
+busy pointer activity, dragging, focus, pausing, reduced motion, Quiet mode, or
+fullscreen hiding. They never open speech bubbles automatically. Each friend
+has its own clickable, draggable, click-through overlay.
+
+Hide/show and summon affect the whole group, with room between friends when
+gathering. Focus applies to everyone; friends added midway inherit the remaining
+time. Turning group mode off keeps your selected character.
+
 ## Run
 
 Windows 11 x64. Extract **Byte-win-x64.zip** and run **Byte.exe**, or run
@@ -14,6 +40,8 @@ This is an unsigned local build, so Windows may show a reputation warning.
 
 - Click Byte for its small menu; double-click to celebrate.
 - Drag the character and release to gently toss it. It lands above the taskbar.
+  A release watchdog also checks the physical mouse-button state, so a missed
+  Windows mouse-up message cannot leave a character attached to the pointer.
 - **Ctrl+Alt+B** summons it to the monitor containing the pointer.
 - **Ctrl+Alt+H** immediately hides/shows it for presentations.
 - Right-click the mint robot tray icon for Quiet / Balanced / Playful, pause,
@@ -83,7 +111,8 @@ vector sprite; the timer adapts from roughly 60 Hz during movement to 10 Hz idle
 and 4 Hz while hidden, with no continuous background render loop. This avoids
 shipping a web runtime and lets the idle character use a small native overlay.
 
-- `Byte.Core`: platform-independent geometry, settings, physics, behavior.
+- `Byte.Core`: platform-independent geometry, settings, physics, behavior and
+  bounded pairwise social choreography (`SocialBehavior.cs`).
 - `Byte.App\Character.cs`: original artwork and pose animation only.
 - `Byte.App\Native.cs`, `Overlay.cs`: native integration and pointer interaction.
 - `Byte.App\CompanionHost.cs`: app lifecycle, tray, timing, and orchestration.
@@ -104,16 +133,18 @@ That skips native verification, not core tests.
 
 **Native smoke tests temporarily move the pointer and inject clicks** into
 Byte and a dedicated test window in a separate process; don't use the pointer
-during the approximately 15-second run. The pointer is restored and the test
+during the approximately 30-second run. The pointer is restored and the test
 window is closed afterward. The test does not capture the desktop. Its
 `artifacts\Byte-character.png` contact sheet renders Byte's own vector artwork
 directly into an offscreen bitmap.
 
 Reports live in `artifacts\core-tests.txt`, `artifacts\native-smoke.json`,
-and `artifacts\package-sha256.txt`. Native checks cover cross-process click
+and `artifacts\package-sha256.txt`. `artifacts\Byte-friends.png` is an offscreen
+render of all three characters. Native checks cover cross-process click
 pass-through, real character clicks / double-clicks / dragging / tossing,
 bubble hit testing and outside dismissal, no activation, quick-hide/summon
-message routing, actual monitor placement and a monitor leap when two displays
+message routing, lost-mouse-up recovery, solo/group switching, every friend's
+interaction menu, group focus/hide/summon, actual monitor placement and a monitor leap when two displays
 are attached. Synthetic layouts cover negative coordinates, mixed DPI, gaps,
 vertical stacking, disconnected destinations, focus timing, and safe tossing.
 

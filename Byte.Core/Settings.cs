@@ -3,6 +3,7 @@ using System;
 namespace Byte.Core;
 
 public enum ActivityLevel { Quiet, Balanced, Playful }
+public enum CharacterKind { Byte, Pip, Orbit }
 public sealed class Settings
 {
     public ActivityLevel Activity { get; set; } = ActivityLevel.Balanced;
@@ -16,10 +17,14 @@ public sealed class Settings
     public int FocusMinutes { get; set; } = 25;
     public bool PauseForFullscreen { get; set; } = true;
     public bool PointerPlay { get; set; } = true;
+    public CharacterKind Character { get; set; } = CharacterKind.Byte;
+    public bool FriendsTogether { get; set; }
+    public bool AutoInteractions { get; set; } = true;
 
     public void Validate()
     {
         if (!Enum.IsDefined(Activity)) Activity = ActivityLevel.Balanced;
+        if (!Enum.IsDefined(Character)) Character = CharacterKind.Byte;
         Size = double.IsFinite(Size) ? Math.Clamp(Size, .65, 1.6) : 1;
         FocusMinutes = Math.Clamp(FocusMinutes, 1, 180);
         if (string.IsNullOrWhiteSpace(SummonHotkey)) SummonHotkey = "Ctrl+Alt+B";

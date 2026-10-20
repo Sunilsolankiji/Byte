@@ -23,6 +23,8 @@ internal sealed class Overlay : Window
     private readonly Companion bot;
     private PointD down, offset;
     private bool pressed, dragging;
+    private long pressedAt;
+    internal bool SuppressNextMouseUp { get; set; }
     private readonly Queue<(PointD Point, long Time)> samples = new();
     private readonly DispatcherTimer clickTimer = new();
     private (int X, int Y, int W, int H) lastBounds;
@@ -69,6 +71,13 @@ internal sealed class Overlay : Window
 
     private IntPtr Hook(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam, ref bool handled)
     {
+        if (msg == 0x001F) CancelInteraction();
+        if (msg == 0x0202 && SuppressNextMouseUp)
+        {
+            SuppressNextMouseUp = false;
+            handled = true;
+            return IntPtr.Zero;
+        }
         if (msg is 0x0201 or 0x0202 or 0x0021) InputDiagnostic?.Invoke("Native " + msg.ToString("X"));
         if (msg == Native.WmMouseActivate) { handled = true; return new IntPtr(3); }
         if (msg == Native.WmNcHitTest && !pressed)
@@ -95,10 +104,13 @@ internal sealed class Overlay : Window
         down = Native.Cursor();
         offset = bot.Feet - down;
         pressed = true;
+        pressedAt = Stopwatch.GetTimestamp();
         dragging = false;
         samples.Clear();
         samples.Enqueue((down, Stopwatch.GetTimestamp()));
-        InputDiagnostic?.Invoke("Capture " + CaptureMouse());
+        var captured = CaptureMouse();
+        InputDiagnostic?.Invoke("Capture " + captured);
+        if (!captured) pressed = false;
         e.Handled = true;
     }
 
@@ -124,6 +136,12 @@ internal sealed class Overlay : Window
     private void OnUp(object sender, MouseButtonEventArgs e)
     {
         InputDiagnostic?.Invoke("Up pressed=" + pressed + " dragging=" + dragging);
+        FinishRelease();
+        e.Handled = true;
+    }
+
+    private void FinishRelease()
+    {
         if (!pressed) return;
         pressed = false;
         ReleaseMouseCapture();
@@ -136,7 +154,12 @@ internal sealed class Overlay : Window
         }
         else clickTimer.Start();
         dragging = false;
-        e.Handled = true;
+    }
+
+    public void CheckDragRelease()
+    {
+        if (pressed && (Stopwatch.GetTimestamp() - pressedAt) / (double)Stopwatch.Frequency > .15 &&
+            !Native.LeftMouseDown) FinishRelease();
     }
 
     public void RenderPosition()

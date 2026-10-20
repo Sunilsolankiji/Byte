@@ -17,6 +17,10 @@ internal sealed class Character : FrameworkElement
         Color.FromRgb(224, 251, 232), Color.FromRgb(100, 200, 178), 75));
     private static readonly Brush Glass = Frozen(new LinearGradientBrush(
         Color.FromRgb(26, 63, 68), Color.FromRgb(9, 25, 35), 90));
+    private static readonly Brush PipShell = Frozen(new LinearGradientBrush(
+        Color.FromRgb(255, 221, 187), Color.FromRgb(238, 145, 124), 75));
+    private static readonly Brush OrbitShell = Frozen(new LinearGradientBrush(
+        Color.FromRgb(223, 218, 255), Color.FromRgb(153, 144, 225), 75));
     private readonly Dictionary<string, FormattedText> textCache = new();
     public Companion Bot { get; }
     public Character(Companion bot) { Bot = bot; Width = 154; Height = 170; Focusable = false; }
@@ -42,7 +46,9 @@ internal sealed class Character : FrameworkElement
         new Rect(28, 43, 99, 91).Contains(p) ||
         new Rect(10, 76, 134, 49).Contains(p) ||
         new Rect(39, 129, 78, 38).Contains(p) ||
-        new Rect(67, 10, 35, 36).Contains(p);
+        new Rect(67, 10, 35, 36).Contains(p) ||
+        Bot.Kind == CharacterKind.Pip && (new Rect(30, 25, 28, 35).Contains(p) || new Rect(98, 25, 28, 35).Contains(p)) ||
+        Bot.Kind == CharacterKind.Orbit && new Rect(16, 98, 122, 25).Contains(p);
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters) =>
         Interactive(hitTestParameters.HitPoint) ? new PointHitTestResult(this, hitTestParameters.HitPoint) : null;
@@ -53,7 +59,9 @@ internal sealed class Character : FrameworkElement
         var t = Bot.StateAge;
         var reduced = Bot.ReducedMotion;
         var resting = mood is Mood.Sleep or Mood.Sit;
-        var walk = mood == Mood.Walk;
+        var walk = mood is Mood.Walk or Mood.Approach;
+        var shell = Bot.Kind switch { CharacterKind.Pip => PipShell, CharacterKind.Orbit => OrbitShell, _ => Shell };
+        var accent = Bot.Kind switch { CharacterKind.Pip => Coral, CharacterKind.Orbit => Purple, _ => Teal };
         var bounce = reduced ? 0 : walk ? Math.Abs(Math.Sin(t * 10)) * -4 : Math.Sin(t * 2) * 1.6;
         var tilt = reduced ? 0 : mood switch
         {
@@ -82,21 +90,46 @@ internal sealed class Character : FrameworkElement
             var lifted = mood is Mood.Leap or Mood.Drag ? -10 : Math.Min(0, stride);
             Line(dc, Outline, x, 125 + sit, x + stride, 151 + lifted);
             dc.DrawRoundedRectangle(Ink, null, new(x - 15 + stride, 151 + lifted, 29, 12), 6, 6);
-            dc.DrawRoundedRectangle(Teal, null, new(x - 13 + stride, 151 + lifted, 25, 8), 4, 4);
+            dc.DrawRoundedRectangle(accent, null, new(x - 13 + stride, 151 + lifted, 25, 8), 4, 4);
             Line(dc, new Pen(Mint, 1.3), x - 8 + stride, 154 + lifted, x + 5 + stride, 154 + lifted);
         }
         dc.PushTransform(new TranslateTransform(0, bounce + sit));
         dc.PushTransform(new RotateTransform(tilt, 77, 132));
         dc.PushTransform(new ScaleTransform(1 + (1 - squash) * .35, squash, 77, 132));
 
-        var antenna = reduced ? 0 : Math.Sin(t * 3) * 3;
-        Line(dc, Wire, 77, 46, 84 + antenna, 32);
-        dc.PushOpacity(.15);
-        dc.DrawEllipse(Mint, null, new(87 + antenna, 23), 13, 13);
-        dc.Pop();
-        dc.DrawEllipse(Gold, Outline, new(87 + antenna, 23), 6.5, 6.5);
-        dc.DrawEllipse(White, null, new(85 + antenna, 21), 2, 2);
-        dc.DrawRoundedRectangle(Ink, null, new(65, 41, 25, 8), 4, 4);
+        if (Bot.Kind == CharacterKind.Pip)
+        {
+            Triangle(dc, shell, new(31, 58), new(33, 28), new(59, 49));
+            Triangle(dc, shell, new(96, 49), new(122, 28), new(124, 58));
+            Triangle(dc, Coral, new(38, 48), new(39, 37), new(50, 47));
+            Triangle(dc, Coral, new(105, 47), new(116, 37), new(117, 48));
+            var tail = new StreamGeometry();
+            using (var ctx = tail.Open())
+            {
+                ctx.BeginFigure(new(123, 119), false, false);
+                ctx.BezierTo(new(149, 126), new(146, 87), new(135, 95), true, false);
+            }
+            dc.DrawGeometry(null, new Pen(Ink, 9), tail);
+            dc.DrawGeometry(null, new Pen(Coral, 5), tail);
+        }
+        else if (Bot.Kind == CharacterKind.Orbit)
+        {
+            dc.DrawEllipse(null, new Pen(Purple, 3), new(78, 32), 24, 7);
+            var angle = reduced ? 0 : t * 1.3;
+            dc.DrawEllipse(Gold, Outline, new(78 + Math.Cos(angle) * 24, 32 + Math.Sin(angle) * 7), 4, 4);
+            Line(dc, Wire, 77, 47, 77, 39);
+        }
+        else
+        {
+            var antenna = reduced ? 0 : Math.Sin(t * 3) * 3;
+            Line(dc, Wire, 77, 46, 84 + antenna, 32);
+            dc.PushOpacity(.15);
+            dc.DrawEllipse(Mint, null, new(87 + antenna, 23), 13, 13);
+            dc.Pop();
+            dc.DrawEllipse(Gold, Outline, new(87 + antenna, 23), 6.5, 6.5);
+            dc.DrawEllipse(White, null, new(85 + antenna, 21), 2, 2);
+            dc.DrawRoundedRectangle(Ink, null, new(65, 41, 25, 8), 4, 4);
+        }
 
         var handsUp = mood is Mood.Celebrate or Mood.Stretch or Mood.Fall;
         for (var i = 0; i < 2; i++)
@@ -104,11 +137,16 @@ internal sealed class Character : FrameworkElement
             var x = i == 0 ? 28 : 126;
             var endX = i == 0 ? 17 : 137;
             var endY = handsUp ? 68 : 113 + (reduced ? 0 : Math.Sin(t * 4 + i) * 3);
+            if (mood is Mood.HighFive or Mood.Wave && (i == 1) == (Bot.Facing > 0))
+            {
+                endX += mood == Mood.HighFive ? (i == 0 ? -5 : 5) : 0;
+                endY = mood == Mood.HighFive ? 80 : 66 + (reduced ? 0 : Math.Sin(t * 8) * 7);
+            }
             Line(dc, Outline, x, 97, endX, endY);
-            dc.DrawEllipse(Teal, Outline, new(endX, endY), 6, 7);
+            dc.DrawEllipse(accent, Outline, new(endX, endY), 6, 7);
             Line(dc, new Pen(Mint, 1), endX - 2, endY - 3, endX + 1, endY - 4);
         }
-        dc.DrawRoundedRectangle(Shell, Outline, new(29, 47, 96, 86), 17, 17);
+        dc.DrawRoundedRectangle(shell, Outline, new(29, 47, 96, 86), Bot.Kind == CharacterKind.Orbit ? 29 : 17, 17);
         dc.DrawRoundedRectangle(null, new Pen(White, 1), new(33, 50, 88, 77), 14, 14);
         dc.DrawRoundedRectangle(Glass, new Pen(Ink, 2), new(37, 56, 80, 61), 10, 10);
         dc.PushOpacity(.35);
@@ -131,13 +169,25 @@ internal sealed class Character : FrameworkElement
         else
         {
             var eyeHeight = blink ? 2 : mood is Mood.Sit or Mood.Focus ? 8 : 15;
-            var offset = mood is Mood.Inspect or Mood.Peek or Mood.Walk ? Bot.Facing * 3 : 0;
+            var offset = mood is Mood.Inspect or Mood.Peek or Mood.Walk or Mood.Approach or Mood.Wave or Mood.HighFive ? Bot.Facing * 3 : 0;
             dc.DrawRoundedRectangle(Mint, null, new(50 + offset, 76, 11, eyeHeight), 4, 4);
             dc.DrawRoundedRectangle(Mint, null, new(93 + offset, 76, 11, eyeHeight), 4, 4);
             if (!blink)
             {
                 dc.DrawRectangle(White, null, new(52 + offset, 78, 3, 3));
                 dc.DrawRectangle(White, null, new(95 + offset, 78, 3, 3));
+            }
+            if (Bot.Kind == CharacterKind.Pip)
+            {
+                Line(dc, new Pen(Coral, 1.5), 42, 94, 52, 96);
+                Line(dc, new Pen(Coral, 1.5), 42, 100, 52, 99);
+                Line(dc, new Pen(Coral, 1.5), 102, 96, 112, 94);
+                Line(dc, new Pen(Coral, 1.5), 102, 99, 112, 100);
+            }
+            if (Bot.Kind == CharacterKind.Orbit)
+            {
+                dc.DrawEllipse(shell, Outline, new(77, 121), 59, 10);
+                for (var i = 0; i < 5; i++) dc.DrawEllipse(i % 2 == 0 ? Gold : Mint, null, new(40 + i * 18, 122), 3, 2);
             }
             if (mood is Mood.Drag or Mood.Trip or Mood.Fall)
                 dc.DrawEllipse(null, new Pen(Mint, 2), new(77, 101), 4, 5);
@@ -148,7 +198,7 @@ internal sealed class Character : FrameworkElement
             }
         }
         dc.DrawEllipse(Gold, null, new(45, 124), 2, 2);
-        Text(dc, ">_", 68, 119, 8, Ink);
+        Text(dc, Bot.Kind switch { CharacterKind.Pip => ":3", CharacterKind.Orbit => "*", _ => ">_" }, 68, 119, 8, Ink);
         for (var i = 0; i < 3; i++) Line(dc, new Pen(Dim, 1), 100 + i * 4, 122, 100 + i * 4, 126);
         if (Bot.IsFocusing || mood == Mood.Focus)
         {
@@ -217,6 +267,7 @@ internal sealed class Character : FrameworkElement
                 Text(dc, i == 1 ? "{}" : "<>", x + 4, y + 1, 10, Ink);
                 dc.Pop();
             }
+
         }
         if (mood == Mood.Celebrate && !reduced)
         {
@@ -236,5 +287,17 @@ internal sealed class Character : FrameworkElement
             dc.Pop();
         }
         dc.Pop();
+    }
+
+    private static void Triangle(DrawingContext dc, Brush fill, Point a, Point b, Point c)
+    {
+        var shape = new StreamGeometry();
+        using (var context = shape.Open())
+        {
+            context.BeginFigure(a, true, true);
+            context.LineTo(b, true, false);
+            context.LineTo(c, true, false);
+        }
+        dc.DrawGeometry(fill, Outline, shape);
     }
 }

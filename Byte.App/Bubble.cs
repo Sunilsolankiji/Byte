@@ -42,10 +42,11 @@ internal sealed class Bubble : Window
         };
     }
 
-    public void Menu(Companion bot, Action<Mood> act, Action joke, Action focus, Action hide, Action settings, Action nextMonitor)
+    public void Menu(Companion bot, Action<Mood> act, Action joke, Action focus, Action hide, Action settings, Action nextMonitor,
+        Action? switchCharacter = null, Action? toggleFriends = null)
     {
         var panel = new StackPanel { MinWidth = 178 };
-        panel.Children.Add(Label("BYTE / tiny terminal friend", 10, "#8EC8B7"));
+        panel.Children.Add(Label(bot.Kind.ToString().ToUpperInvariant() + " / tiny desktop friend", 10, "#8EC8B7"));
         panel.Children.Add(Label(bot.IsFocusing
             ? $"Focus • {Math.Ceiling(bot.FocusRemaining / 60)} min left" : "A small break in your stack.", 12, "#ECF8F3"));
         Add("Tell me a dev joke", joke);
@@ -53,6 +54,8 @@ internal sealed class Bubble : Window
         Add(bot.IsFocusing ? "End focus timer" : $"Focus with me · {bot.Settings.FocusMinutes} min", focus);
         Add("Take a nap", () => act(Mood.Sleep));
         Add("Hop to next monitor", nextMonitor);
+        if (switchCharacter is not null) Add("Switch character", switchCharacter);
+        if (toggleFriends is not null) Add(bot.Settings.FriendsTogether ? "Just one character" : "Bring friends together", toggleFriends);
         Add("Settings", settings);
         Add("Hide Byte", hide);
         border.Child = panel;

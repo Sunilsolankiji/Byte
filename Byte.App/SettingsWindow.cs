@@ -27,6 +27,11 @@ internal sealed class SettingsWindow : Window
         Label("Personality");
         var activity = new ComboBox { ItemsSource = Enum.GetValues<ActivityLevel>(), SelectedItem = original.Activity };
         panel.Children.Add(activity);
+        Label("Selected character");
+        var character = new ComboBox { ItemsSource = Enum.GetValues<CharacterKind>(), SelectedItem = original.Character };
+        panel.Children.Add(character);
+        var together = Check("Show all three friends together", original.FriendsTogether);
+        var social = Check("Automatic friendly interactions (quiet and occasional)", original.AutoInteractions);
         Label("Character size");
         var size = new Slider { Minimum = .65, Maximum = 1.6, Value = original.Size, TickFrequency = .05, IsSnapToTickEnabled = true };
         panel.Children.Add(size);
@@ -63,6 +68,8 @@ internal sealed class SettingsWindow : Window
                 var next = new Settings
                 {
                     Activity = (ActivityLevel)activity.SelectedItem, Size = size.Value,
+                    Character = (CharacterKind)character.SelectedItem, FriendsTogether = together.IsChecked == true,
+                    AutoInteractions = social.IsChecked == true,
                     ReducedMotion = reduced.IsChecked == true, RespectSystemReducedMotion = systemMotion.IsChecked == true,
                     PointerPlay = pointer.IsChecked == true, PauseForFullscreen = fullscreen.IsChecked == true,
                     LaunchAtLogin = startup.IsChecked == true, Muted = muted.IsChecked == true,

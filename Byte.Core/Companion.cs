@@ -7,7 +7,8 @@ namespace Byte.Core;
 public enum Mood
 {
     Idle, Walk, Sit, Peek, Sleep, Windup, Leap, Landing, Drag, Fall,
-    Celebrate, Inspect, Sign, Cable, Bug, Warm, Blocks, Focus, Stretch, Trip
+    Celebrate, Inspect, Sign, Cable, Bug, Warm, Blocks, Focus, Stretch, Trip,
+    Approach, Wave, HighFive
 }
 
 public sealed class Companion
@@ -24,8 +25,13 @@ public sealed class Companion
     private double pointerCooldown;
     private string? lastPointerDisplay;
     private string? pendingDisplay;
+    private double socialTarget;
 
     public Settings Settings { get; }
+    public CharacterKind Kind { get; set; }
+    public bool IsSocial { get; private set; }
+    public bool CanSocialize => !Paused && !ReducedMotion && !IsFocusing && !dragging &&
+        (IsSocial || Mood is Mood.Idle or Mood.Walk or Mood.Sit or Mood.Peek);
     public PointD Feet { get; private set; }
     public Display CurrentDisplay { get; private set; }
     public Mood Mood { get; private set; } = Mood.Idle;
@@ -45,6 +51,7 @@ public sealed class Companion
         if (displays.Count == 0) throw new ArgumentException("At least one display is required.", nameof(displays));
         this.displays = displays;
         Settings = settings;
+        Kind = settings.Character;
         random = seed.HasValue ? new Random(seed.Value) : new Random();
         CurrentDisplay = displays.FirstOrDefault(d => d.Primary) ?? displays[0];
         Feet = Desktop.ClampFeet(CurrentDisplay,
@@ -59,6 +66,30 @@ public sealed class Companion
         nextDecision = duration > 0 ? duration : Interval();
     }
 
+    public void ApproachFriend(double x)
+    {
+        if (!CanSocialize) return;
+        pendingDisplay = null;
+        IsSocial = true;
+        socialTarget = Desktop.ClampFeet(CurrentDisplay, new PointD(x, CurrentDisplay.Work.Bottom), Settings.Size).X;
+        facing = socialTarget < Feet.X ? -1 : 1;
+        Enter(Mood.Approach);
+    }
+
+    public void GreetFriend(Mood pose, double friendX)
+    {
+        if (!IsSocial) return;
+        facing = friendX < Feet.X ? -1 : 1;
+        Enter(pose, 5);
+    }
+
+    public void EndSocial()
+    {
+        if (!IsSocial) return;
+        IsSocial = false;
+        Enter(IsFocusing ? Mood.Focus : Mood.Idle);
+    }
+
     private double Interval() => Settings.Activity switch
     {
         ActivityLevel.Quiet => 35 + random.NextDouble() * 45,
@@ -70,6 +101,7 @@ public sealed class Companion
     {
         if (next.Count == 0) return;
         displays = next;
+        IsSocial = false;
         var destination = next.FirstOrDefault(d => d.Id == CurrentDisplay.Id) ?? Desktop.Nearest(next, Feet);
         CurrentDisplay = destination;
         Feet = Desktop.ClampFeet(destination, Feet, Settings.Size);
@@ -83,6 +115,7 @@ public sealed class Companion
 
     public void Summon(PointD pointer)
     {
+        IsSocial = false;
         CurrentDisplay = Desktop.Nearest(displays, pointer);
         Feet = Desktop.ClampFeet(CurrentDisplay, new PointD(pointer.X, CurrentDisplay.Work.Bottom), Settings.Size);
         velocity = default;
@@ -94,6 +127,7 @@ public sealed class Companion
 
     public void StartDrag()
     {
+        IsSocial = false;
         dragging = true;
         jump = null;
         pendingDisplay = null;
@@ -121,6 +155,7 @@ public sealed class Companion
 
     public void CancelDrag()
     {
+        IsSocial = false;
         dragging = false;
         pendingDisplay = null;
         jump = null;
@@ -133,6 +168,7 @@ public sealed class Companion
     public void Act(Mood mood)
     {
         if (dragging) return;
+        IsSocial = false;
         jump = null;
         pendingDisplay = null;
         velocity = default;
@@ -143,7 +179,12 @@ public sealed class Companion
 
     public void StartFocus(int minutes)
     {
-        focusRemaining = Math.Clamp(minutes, 1, 180) * 60;
+        StartFocusRemaining(Math.Clamp(minutes, 1, 180) * 60);
+    }
+
+    public void StartFocusRemaining(double seconds)
+    {
+        focusRemaining = Math.Clamp(seconds, 0, 180 * 60);
         Act(Mood.Focus);
     }
 
@@ -185,6 +226,7 @@ public sealed class Companion
         if (dragging || Paused) return;
         if (busy && Mood is not (Mood.Leap or Mood.Windup or Mood.Fall or Mood.Landing))
         {
+            IsSocial = false;
             pendingDisplay = null;
             if (Mood is not (Mood.Focus or Mood.Sleep or Mood.Sit)) Enter(IsFocusing ? Mood.Focus : Mood.Sit);
             return;
@@ -192,7 +234,13 @@ public sealed class Companion
         age += Math.Clamp(elapsed, 0, .25);
         pointerCooldown = Math.Max(0, pointerCooldown - Math.Max(0, elapsed));
         var scale = CurrentDisplay.Scale * Settings.Size;
-        if (Mood == Mood.Windup && age >= .65 && jump is not null)
+        if (Mood == Mood.Approach && IsSocial)
+        {
+            var delta = socialTarget - Feet.X;
+            Feet = new PointD(Feet.X + Math.Sign(delta) * Math.Min(Math.Abs(delta), 85 * scale * dt), CurrentDisplay.Work.Bottom);
+            if (Math.Abs(delta) < 2 * scale) Enter(Mood.Idle);
+        }
+        else if (Mood == Mood.Windup && age >= .65 && jump is not null)
             Enter(Mood.Leap);
         else if (Mood == Mood.Leap && jump is not null)
         {
@@ -247,6 +295,7 @@ public sealed class Companion
             Feet = Desktop.ClampFeet(CurrentDisplay, Feet + new PointD(Math.Sin(age * 3) * 25 * scale * dt, 0), Settings.Size);
 
         if (Mood is Mood.Leap or Mood.Windup or Mood.Fall) return;
+        if (IsSocial) return;
         if (pendingDisplay is not null) return;
         if (IsFocusing)
         {

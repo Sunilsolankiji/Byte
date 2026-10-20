@@ -60,16 +60,23 @@ internal static class SmokeTests
         app.Run(window);
     }
 
-    private static async Task Click(Point point)
+    internal static async Task Click(Point point)
     {
         if (!SetCursorPos((int)point.X, (int)point.Y)) throw new InvalidOperationException("Could not move test pointer.");
         await Task.Delay(80);
+        SetCursorPos((int)point.X, (int)point.Y);
         var down = new[] { new Input { Mouse = new MouseInput { Flags = 0x0002 } } };
         if (SendInput(1, down, Marshal.SizeOf<Input>()) != 1) throw new InvalidOperationException("Windows blocked test mouse down.");
         await Task.Delay(80);
         var up = new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } };
         if (SendInput(1, up, Marshal.SizeOf<Input>()) != 1) throw new InvalidOperationException("Windows blocked test mouse up.");
         await Task.Delay(150);
+    }
+
+    internal static void RestorePointer(PointD pointer)
+    {
+        SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } }, Marshal.SizeOf<Input>());
+        SetCursorPos((int)pointer.X, (int)pointer.Y);
     }
 
     public static async Task Run(Overlay overlay, Bubble bubble, Companion bot, IReadOnlyList<Display> displays, IntPtr foreground, string output)
@@ -134,10 +141,16 @@ internal static class SmokeTests
             await Click(transparentPoint);
             Check(File.Exists(probePath + ".clicks") && File.ReadAllLines(probePath + ".clicks").Length == 1,
                 "Actual injected click passes through to a different process");
-            Check(!ByteHasFocus() && Native.GetForegroundWindow() != target, "Pass-through click does not activate Byte or its test target");
+            Check(!ByteHasFocus() && Native.GetForegroundWindow() != target,
+                "Pass-through click does not activate Byte or its test target" +
+                ((!ByteHasFocus() && Native.GetForegroundWindow() != target) ? "" :
+                    "; foreground=" + Native.GetForegroundWindow() + "; initial=" + foreground +
+                    "; overlay=" + overlay.Handle + "; target=" + target + "; input=" + string.Join("; ", inputEvents)));
             await Click(bodyPoint);
             await Task.Delay(System.Windows.Forms.SystemInformation.DoubleClickTime + 150);
-            Check(bubble.IsVisible, "Real character click opens the interaction bubble");
+            Check(bubble.IsVisible, "Real character click opens the interaction bubble" +
+                (bubble.IsVisible ? "" : "; input: " + string.Join("; ", inputEvents) +
+                "; pointer: " + Native.Cursor() + "; intended: " + bodyPoint));
             Check(!ByteHasFocus(), "Opening interaction bubble preserves keyboard focus");
             var bubbleHandle = new WindowInteropHelper(bubble).Handle;
             Native.GetWindowRect(bubbleHandle, out var bubbleRect);
@@ -196,6 +209,26 @@ internal static class SmokeTests
             }
             overlay.RenderPosition();
             Check(bot.Feet.Y == main.Work.Bottom, "Native drag and toss safely land on the work-area floor");
+            await Task.Delay(650);
+            overlay.RenderPosition();
+            var lostUpPoint = overlay.Character.PointToScreen(new Point(77, 88));
+            SetCursorPos((int)lostUpPoint.X, (int)lostUpPoint.Y);
+            await Task.Delay(100);
+            SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0002 } } }, Marshal.SizeOf<Input>());
+            await Task.Delay(100);
+            for (var i = 1; i <= 5; i++)
+            {
+                SetCursorPos((int)lostUpPoint.X + i * 8, (int)lostUpPoint.Y - i * 12);
+                await Task.Delay(35);
+            }
+            Check(bot.Mood == Mood.Drag, "Lost-mouse-up regression begins with a real captured drag");
+            overlay.SuppressNextMouseUp = true;
+            SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } }, Marshal.SizeOf<Input>());
+            await Task.Delay(450);
+            Check(!overlay.SuppressNextMouseUp && bot.Mood == Mood.Fall && !overlay.IsMouseCaptured,
+                "Release watchdog recovers when the native mouse-up message is lost");
+            bot.CancelDrag();
+            overlay.RenderPosition();
             bubble.Hide();
             await Task.Delay(600);
             var doublePoint = overlay.Character.PointToScreen(new Point(77, 88));
@@ -279,8 +312,7 @@ internal static class SmokeTests
         }
         finally
         {
-            SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } }, Marshal.SizeOf<Input>());
-            SetCursorPos((int)originalPointer.X, (int)originalPointer.Y);
+            RestorePointer(originalPointer);
             if (target != IntPtr.Zero) Native.PostMessage(target, 0x0010, IntPtr.Zero, IntPtr.Zero);
             if (process is not null)
             {
