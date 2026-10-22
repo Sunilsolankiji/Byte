@@ -19,6 +19,7 @@ public sealed class SocialBehavior
 
     public void Cancel()
     {
+        foreach (var observer in seenSignals.Keys) observer.EndReaction();
         first?.EndSocial();
         second?.EndSocial();
         first = second = null;

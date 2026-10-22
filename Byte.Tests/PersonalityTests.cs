@@ -166,6 +166,25 @@ internal static class PersonalityTests
         freshSocial.Tick(.05, buddies, settings, true);
         freshSocial.Tick(.05, buddies, settings, false);
         check(!buddies[1].IsReacting, "events during busy or hidden time are consumed without replay");
+        Ready();
+        buddies[0].UserAct(Mood.Celebrate);
+        buddies[0].CancelDrag();
+        new SocialBehavior(72).Tick(.05, buddies, settings, false);
+        check(!buddies[1].IsReacting && buddies[0].Signal is null, "lock/capture cancellation clears unobserved signals instead of replaying them after unlock");
+        Ready();
+        buddies[0].UserAct(Mood.Celebrate);
+        var toggledSocial = new SocialBehavior(89);
+        toggledSocial.Tick(.05, buddies, settings, false);
+        check(buddies[1].IsReacting, "nearby reactions can start again after an explicit new event");
+        settings.AutoInteractions = false;
+        toggledSocial.Tick(.05, buddies, settings, false);
+        check(!buddies[1].IsReacting, "disabling automatic interactions cancels a reaction already in progress");
+        settings.AutoInteractions = true;
+        buddies[0].UserAct(Mood.Celebrate);
+        buddies[0].Kind = CharacterKind.Orbit;
+        check(buddies[0].Signal is null && buddies[0].Memory.For(CharacterKind.Byte).LastInteraction == Interaction.Celebrate,
+            "switching a skin clears transient signals without moving stored identity memories");
+        buddies[0].Kind = CharacterKind.Byte;
 
         var encoded = JsonSerializer.Serialize(memory);
         var restored = JsonSerializer.Deserialize<PersonalityMemory>(encoded)!;

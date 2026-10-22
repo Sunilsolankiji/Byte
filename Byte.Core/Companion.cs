@@ -27,10 +27,21 @@ public sealed class Companion
     private string? pendingDisplay;
     private double socialTarget;
     private Mood? landingReaction;
+    private CharacterKind kind;
 
     public Settings Settings { get; }
     public PersonalityMemory Memory { get; }
-    public CharacterKind Kind { get; set; }
+    public CharacterKind Kind
+    {
+        get => kind;
+        set
+        {
+            if (kind == value) return;
+            kind = value;
+            Signal = null;
+            landingReaction = null;
+        }
+    }
     public bool IsReacting { get; private set; }
     public long SignalVersion { get; private set; }
     public Mood? Signal { get; private set; }
@@ -107,6 +118,11 @@ public sealed class Companion
         return true;
     }
 
+    public void EndReaction()
+    {
+        if (IsReacting) Enter(IsFocusing ? Mood.Focus : Mood.Idle);
+    }
+
     public void ApproachFriend(double x)
     {
         if (!CanSocialize) return;
@@ -141,6 +157,8 @@ public sealed class Companion
     public void UpdateDisplays(IReadOnlyList<Display> next)
     {
         if (next.Count == 0) return;
+        Signal = null;
+        landingReaction = null;
         displays = next;
         IsSocial = false;
         var destination = next.FirstOrDefault(d => d.Id == CurrentDisplay.Id) ?? Desktop.Nearest(next, Feet);
@@ -156,6 +174,8 @@ public sealed class Companion
 
     public void Summon(PointD pointer)
     {
+        Signal = null;
+        landingReaction = null;
         IsSocial = false;
         CurrentDisplay = Desktop.Nearest(displays, pointer);
         Feet = Desktop.ClampFeet(CurrentDisplay, new PointD(pointer.X, CurrentDisplay.Work.Bottom), Settings.Size);
@@ -199,6 +219,7 @@ public sealed class Companion
 
     public void CancelDrag()
     {
+        Signal = null;
         IsSocial = false;
         dragging = false;
         pendingDisplay = null;
