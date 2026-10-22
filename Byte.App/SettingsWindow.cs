@@ -8,7 +8,7 @@ namespace Byte.App;
 
 internal sealed class SettingsWindow : Window
 {
-    public SettingsWindow(Settings original, Action<Settings> save)
+    public SettingsWindow(Settings original, Action<Settings> save, Action forgetMemories)
     {
         Title = "Byte · preferences";
         Width = 420; Height = 670;
@@ -32,6 +32,13 @@ internal sealed class SettingsWindow : Window
         panel.Children.Add(character);
         var together = Check("Show all three friends together", original.FriendsTogether);
         var social = Check("Automatic friendly interactions (quiet and occasional)", original.AutoInteractions);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Friends remember recent play and friendships locally.\nNo work content, pointer history, or personal data is stored.",
+            FontSize = 10, Foreground = Brushes.DarkSlateGray, Margin = new Thickness(0, 9, 0, 4)
+        });
+        var forget = new Button { Content = "Forget character memories", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(8, 4, 8, 4) };
+        panel.Children.Add(forget);
         Label("Character size");
         var size = new Slider { Minimum = .65, Maximum = 1.6, Value = original.Size, TickFrequency = .05, IsSnapToTickEnabled = true };
         panel.Children.Add(size);
@@ -54,6 +61,22 @@ internal sealed class SettingsWindow : Window
         });
         var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
         panel.Children.Add(error);
+        forget.Click += (_, _) =>
+        {
+            if (MessageBox.Show(this, "Reset recent interactions, joke history and friendships for all characters? Your settings and focus timer will be kept.",
+                "Forget character memories", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+            try
+            {
+                forgetMemories();
+                error.Text = "";
+                forget.Content = "Memories cleared";
+            }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+            {
+                Storage.Log(ex);
+                error.Text = "Couldn't clear memories: " + ex.Message;
+            }
+        };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) };
         var cancel = new Button { Content = "Cancel", Padding = new Thickness(16, 6, 16, 6), Margin = new Thickness(0, 0, 8, 0), IsCancel = true };
         var apply = new Button { Content = "Save", Padding = new Thickness(18, 6, 18, 6), IsDefault = true };

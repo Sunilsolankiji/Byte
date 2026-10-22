@@ -21,6 +21,7 @@ internal sealed class Overlay : Window
     public event Action<int, IntPtr>? NativeEvent;
     internal Action<string>? InputDiagnostic { get; set; }
     private readonly Companion bot;
+    private readonly Func<PointD?> readPointer;
     private PointD down, offset;
     private bool pressed, dragging;
     private long pressedAt;
@@ -29,9 +30,10 @@ internal sealed class Overlay : Window
     private readonly DispatcherTimer clickTimer = new();
     private (int X, int Y, int W, int H) lastBounds;
 
-    public Overlay(Companion bot)
+    public Overlay(Companion bot, Func<PointD?>? readPointer = null)
     {
         this.bot = bot;
+        this.readPointer = readPointer ?? Native.ReadCursor;
         Title = "Byte desktop companion";
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.NoResize;
@@ -101,7 +103,8 @@ internal sealed class Overlay : Window
             e.Handled = true;
             return;
         }
-        down = Native.Cursor();
+        if (readPointer() is not PointD pointer) { CancelInteraction(); return; }
+        down = pointer;
         offset = bot.Feet - down;
         pressed = true;
         pressedAt = Stopwatch.GetTimestamp();
@@ -117,7 +120,7 @@ internal sealed class Overlay : Window
     private void OnMove(object sender, MouseEventArgs e)
     {
         if (!pressed) return;
-        var pointer = Native.Cursor();
+        if (readPointer() is not PointD pointer) { CancelInteraction(); return; }
         if (!dragging && (pointer - down).Length > 5)
         {
             dragging = true;
@@ -143,6 +146,7 @@ internal sealed class Overlay : Window
     private void FinishRelease()
     {
         if (!pressed) return;
+        if (readPointer() is not PointD pointer) { CancelInteraction(); return; }
         pressed = false;
         ReleaseMouseCapture();
         if (dragging)
@@ -150,7 +154,7 @@ internal sealed class Overlay : Window
             var now = Stopwatch.GetTimestamp();
             var first = samples.Peek();
             var dt = Math.Max(.016, (now - first.Time) / (double)Stopwatch.Frequency);
-            bot.Release((Native.Cursor() - first.Point) * (1 / dt));
+            bot.Release((pointer - first.Point) * (1 / dt));
         }
         else clickTimer.Start();
         dragging = false;

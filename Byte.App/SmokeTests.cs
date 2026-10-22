@@ -79,6 +79,36 @@ internal static class SmokeTests
         SetCursorPos((int)pointer.X, (int)pointer.Y);
     }
 
+    internal static async Task CheckUnavailableDrag(Overlay overlay, Companion bot, Action unavailable, Action restore)
+    {
+        await Task.Delay(System.Windows.Forms.SystemInformation.DoubleClickTime + 100);
+        overlay.RenderPosition();
+        var point = overlay.Character.PointToScreen(new Point(77, 88));
+        try
+        {
+            SetCursorPos((int)point.X, (int)point.Y);
+            await Task.Delay(100);
+            if (SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0002 } } }, Marshal.SizeOf<Input>()) != 1)
+                throw new InvalidOperationException("Windows blocked the session-regression drag.");
+            await Task.Delay(100);
+            for (var i = 1; i <= 5; i++)
+            {
+                SetCursorPos((int)point.X + i * 8, (int)point.Y - i * 12);
+                await Task.Delay(35);
+            }
+            if (bot.Mood != Mood.Drag || !overlay.IsMouseCaptured)
+                throw new InvalidOperationException("Session-regression drag did not obtain capture.");
+            unavailable();
+            SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } }, Marshal.SizeOf<Input>());
+            await Task.Delay(200);
+        }
+        finally
+        {
+            restore();
+            SendInput(1, new[] { new Input { Mouse = new MouseInput { Flags = 0x0004 } } }, Marshal.SizeOf<Input>());
+        }
+    }
+
     public static async Task Run(Overlay overlay, Bubble bubble, Companion bot, IReadOnlyList<Display> displays, IntPtr foreground, string output)
     {
         var checks = new List<string>();

@@ -7,7 +7,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>Byte</AssemblyName>
     <RootNamespace>Byte.App</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <StartupObject>Byte.App.Program</StartupObject>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- WPF owns process DPI awareness; WinForms is used only for the tray icon. -->

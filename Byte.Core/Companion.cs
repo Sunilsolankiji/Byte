@@ -26,9 +26,15 @@ public sealed class Companion
     private string? lastPointerDisplay;
     private string? pendingDisplay;
     private double socialTarget;
+    private Mood? landingReaction;
 
     public Settings Settings { get; }
+    public PersonalityMemory Memory { get; }
     public CharacterKind Kind { get; set; }
+    public bool IsReacting { get; private set; }
+    public long SignalVersion { get; private set; }
+    public Mood? Signal { get; private set; }
+    public double SignalAge { get; private set; }
     public bool IsSocial { get; private set; }
     public bool CanSocialize => !Paused && !ReducedMotion && !IsFocusing && !dragging &&
         (IsSocial || Mood is Mood.Idle or Mood.Walk or Mood.Sit or Mood.Peek);
@@ -46,11 +52,12 @@ public sealed class Companion
     public bool UsingPortal => jump?.Portal == true && (Mood is Mood.Leap or Mood.Windup);
     public event Action<string>? Speech;
 
-    public Companion(IReadOnlyList<Display> displays, Settings settings, int? seed = null)
+    public Companion(IReadOnlyList<Display> displays, Settings settings, int? seed = null, PersonalityMemory? memory = null)
     {
         if (displays.Count == 0) throw new ArgumentException("At least one display is required.", nameof(displays));
         this.displays = displays;
         Settings = settings;
+        Memory = memory ?? new();
         Kind = settings.Character;
         random = seed.HasValue ? new Random(seed.Value) : new Random();
         CurrentDisplay = displays.FirstOrDefault(d => d.Primary) ?? displays[0];
@@ -61,9 +68,43 @@ public sealed class Companion
 
     private void Enter(Mood mood, double duration = 0)
     {
+        IsReacting = false;
         Mood = mood;
         age = 0;
         nextDecision = duration > 0 ? duration : Interval();
+    }
+
+    public void UserAct(Mood mood)
+    {
+        if (dragging) return;
+        if (mood == Mood.Celebrate) Memory.Remember(Kind, Interaction.Celebrate);
+        else if (mood == Mood.Sleep) Memory.Remember(Kind, Interaction.Nap);
+        Act(mood);
+        if (mood is Mood.Celebrate or Mood.Sleep) Emit(mood);
+    }
+
+    private void Emit(Mood mood)
+    {
+        Signal = mood;
+        SignalAge = 0;
+        SignalVersion++;
+    }
+
+    public bool ReactToFriend(Mood signal, double friendX)
+    {
+        if (!CanSocialize || IsSocial || IsReacting) return false;
+        var pose = signal switch
+        {
+            Mood.Celebrate => Kind == CharacterKind.Pip ? Mood.Stretch : Mood.Wave,
+            Mood.Trip => Kind == CharacterKind.Orbit ? Mood.Wave : Mood.Inspect,
+            Mood.Sleep => Kind == CharacterKind.Pip ? Mood.Warm : Mood.Sit,
+            _ => (Mood?)null
+        };
+        if (!pose.HasValue) return false;
+        Act(pose.Value);
+        facing = friendX < Feet.X ? -1 : 1;
+        IsReacting = true;
+        return true;
     }
 
     public void ApproachFriend(double x)
@@ -127,6 +168,7 @@ public sealed class Companion
 
     public void StartDrag()
     {
+        landingReaction = null;
         IsSocial = false;
         dragging = true;
         jump = null;
@@ -148,6 +190,8 @@ public sealed class Companion
         dragging = false;
         Feet = Desktop.ClampFeet(CurrentDisplay, Feet, Settings.Size);
         var speed = tossVelocity.Length;
+        Memory.Remember(Kind, speed > 800 ? Interaction.WildToss : Interaction.GentleToss);
+        landingReaction = speed > 800 ? Mood.Sit : Kind == CharacterKind.Pip ? Mood.Stretch : Mood.Wave;
         velocity = speed > 1400 ? tossVelocity * (1400 / speed) : tossVelocity;
         if (ReducedMotion) velocity = default;
         Enter(Mood.Fall);
@@ -159,6 +203,7 @@ public sealed class Companion
         dragging = false;
         pendingDisplay = null;
         jump = null;
+        landingReaction = null;
         velocity = default;
         Feet = Desktop.ClampFeet(CurrentDisplay, Feet, Settings.Size);
         Feet = new PointD(Feet.X, CurrentDisplay.Work.Bottom);
@@ -179,6 +224,7 @@ public sealed class Companion
 
     public void StartFocus(int minutes)
     {
+        Memory.Remember(Kind, Interaction.Focus);
         StartFocusRemaining(Math.Clamp(minutes, 1, 180) * 60);
     }
 
@@ -218,6 +264,7 @@ public sealed class Companion
     public void Tick(double elapsed, PointD pointer, bool busy)
     {
         var dt = Math.Clamp(elapsed, 0, .05);
+        SignalAge += Math.Max(0, elapsed);
         if (focusRemaining > 0)
         {
             focusRemaining = Math.Max(0, focusRemaining - Math.Max(0, elapsed));
@@ -303,33 +350,35 @@ public sealed class Companion
             return;
         }
         if (age < nextDecision) return;
+        if (Mood == Mood.Landing && landingReaction.HasValue && !ReducedMotion)
+        {
+            var reaction = landingReaction.Value;
+            landingReaction = null;
+            Enter(reaction, 3);
+            return;
+        }
         if (Mood != Mood.Idle)
         {
             Enter(Mood.Idle);
             return;
         }
-        if (ReducedMotion || Settings.Activity == ActivityLevel.Quiet)
-        {
-            Enter(random.Next(3) == 0 ? Mood.Sleep : Mood.Sit);
-            return;
-        }
-        var choice = random.Next(100);
-        if (displays.Count > 1 && choice < 13)
+        var selected = Personality.ChooseActivity(Kind, Memory.For(Kind),
+            Settings.PointerPlay && pointerCooldown == 0 && CurrentDisplay.Work.Contains(pointer) &&
+            (pointer - Feet).Length < 320 * scale, displays.Count > 1,
+            ReducedMotion || Settings.Activity == ActivityLevel.Quiet, random);
+        Memory.RememberActivity(Kind, selected);
+        if (selected == Mood.Windup)
         {
             var others = displays.Where(d => d.Id != CurrentDisplay.Id).ToArray();
             JumpTo(others[random.Next(others.Length)]);
         }
-        else if (choice < 48)
+        else if (selected == Mood.Walk)
         {
             facing = random.Next(2) == 0 ? -1 : 1;
             Feet = new PointD(Feet.X, CurrentDisplay.Work.Bottom);
             Enter(Mood.Walk, 3 + random.Next(6));
         }
-        else if (choice < 60) Enter(Mood.Sleep, 35);
-        else if (choice < 72) Enter(Mood.Sit, 12);
-        else if (choice < 77) Enter(Mood.Trip, 2);
-        else if (Settings.PointerPlay && pointerCooldown == 0 &&
-                 CurrentDisplay.Work.Contains(pointer) && (pointer - Feet).Length < 320 * scale)
+        else if (selected == Mood.Inspect)
         {
             // A short, bounded pursuit; never follow the pointer across the user's work.
             lastPointerDisplay = CurrentDisplay.Id;
@@ -337,7 +386,11 @@ public sealed class Companion
             facing = pointer.X < Feet.X ? -1 : 1;
             Enter(Mood.Inspect, 5);
         }
-        else Enter(new[] { Mood.Sign, Mood.Cable, Mood.Bug, Mood.Warm, Mood.Blocks }[random.Next(5)], 6);
+        else
+        {
+            Enter(selected, selected switch { Mood.Sleep => 35, Mood.Sit => 12, Mood.Trip => 2, _ => 6 });
+            if (selected == Mood.Trip) Emit(selected);
+        }
     }
 
     public void PointerMoved(bool busy)
@@ -358,12 +411,8 @@ public sealed class Companion
             "My sleep schedule?\nA very optimistic cron job.",
             "Hello, world!\nNo, not the production one."
         };
-        var index = lastJoke < 0 ? random.Next(jokes.Length) : random.Next(jokes.Length - 1);
-        if (lastJoke >= 0 && index >= lastJoke) index++;
-        lastJoke = index;
+        var index = Memory.NextJoke(Kind, random, jokes.Length);
         Speech?.Invoke(jokes[index]);
         Act(Mood.Sign);
     }
-
-    private int lastJoke = -1;
 }

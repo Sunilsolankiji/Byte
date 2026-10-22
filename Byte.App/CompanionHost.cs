@@ -16,6 +16,10 @@ internal sealed class CompanionHost : IDisposable
 {
     private readonly Storage storage = new();
     private readonly Settings settings;
+    private readonly PersonalityMemory memory;
+    private long savedMemoryRevision;
+    private double lastMemorySave;
+    private bool memorySaveFailed;
     private readonly Companion bot;
     private List<Display> displays;
     private readonly Overlay overlay;
@@ -35,23 +39,28 @@ internal sealed class CompanionHost : IDisposable
     private SettingsWindow? preferences;
     private readonly bool smoke;
     private readonly IntPtr initialForeground;
+    private Func<PointD?> readPointer = Native.ReadCursor;
+    private bool inputUnavailable, displayRefreshPending;
+    private bool DesktopBlocked => locked || suspended || inputUnavailable;
 
     public CompanionHost(string[] args)
     {
         smoke = args.Contains("--smoke-test");
         initialForeground = Native.GetForegroundWindow();
         settings = storage.Load();
+        memory = smoke ? new() : storage.LoadMemory();
+        savedMemoryRevision = memory.Revision;
         displays = Native.Displays();
-        bot = new(displays, settings);
+        bot = new(displays, settings, memory: memory);
         RefreshMotion();
-        overlay = new(bot);
+        overlay = new(bot, () => readPointer());
         menuBot = bot;
         residents.Add((bot, overlay));
         WireResident(bot, overlay);
         overlay.Show();
         overlay.RenderPosition();
         hotkeys = new(overlay.Handle);
-        string? warning = storage.Warning;
+        string? warning = storage.Warning ?? storage.MemoryWarning;
         try { hotkeys.Set(settings.SummonHotkey, settings.HideHotkey); }
         catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception)
         {
@@ -78,7 +87,8 @@ internal sealed class CompanionHost : IDisposable
         displayTimer.Tick += (_, _) => { displayTimer.Stop(); RecoverDisplays(); };
         timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         timer.Tick += Tick;
-        previousPointer = Native.Cursor();
+        if (readPointer() is PointD pointer) previousPointer = pointer;
+        else { inputUnavailable = true; HideResidents(); }
         timer.Start();
         if (smoke)
         {
@@ -94,6 +104,8 @@ internal sealed class CompanionHost : IDisposable
                     bot.Paused = true;
                     await SmokeTests.Run(overlay, bubble, bot, displays, initialForeground, output);
                     await RunFriendsSmoke(output);
+                    await RunSessionSmoke(output);
+                    RunPersonalitySmoke(output);
                     Application.Current.Shutdown(0);
                 }
                 catch (Exception ex)
@@ -155,9 +167,9 @@ internal sealed class CompanionHost : IDisposable
             {
                 if (residents.Count <= i + 1)
                 {
-                    var companion = new Companion(displays, settings) { Kind = kinds[i], Paused = bot.Paused };
+                    var companion = new Companion(displays, settings, memory: memory) { Kind = kinds[i], Paused = bot.Paused };
                     if (bot.IsFocusing) companion.StartFocusRemaining(bot.FocusRemaining);
-                    var window = new Overlay(companion);
+                    var window = new Overlay(companion, () => readPointer());
                     WireResident(companion, window);
                     residents.Add((companion, window));
                     window.Show();
@@ -171,7 +183,7 @@ internal sealed class CompanionHost : IDisposable
         foreach (var resident in residents)
         {
             resident.Overlay.InvalidatePlacement();
-            if (!hidden && !fullscreen && !locked && !suspended)
+            if (!hidden && !fullscreen && !DesktopBlocked)
             {
                 resident.Overlay.Show();
                 resident.Overlay.RenderPosition();
@@ -199,7 +211,11 @@ internal sealed class CompanionHost : IDisposable
         }
         else if (msg is 0x007E or 0x001A) displayTimer.Start();
         else if (msg == 0x02E0)
-            Application.Current.Dispatcher.BeginInvoke(() => { overlay.InvalidatePlacement(); overlay.RenderPosition(); });
+            Application.Current.Dispatcher.BeginInvoke(() =>
+            {
+                overlay.InvalidatePlacement();
+                if (!DesktopBlocked) overlay.RenderPosition();
+            });
         else if (msg == 0x0218)
         {
             if (wparam.ToInt32() == 4) { suspended = true; HideResidents(); }
@@ -219,6 +235,8 @@ internal sealed class CompanionHost : IDisposable
 
     private void RecoverDisplays()
     {
+        if (DesktopBlocked) { displayRefreshPending = true; return; }
+        displayRefreshPending = false;
         displays = Native.Displays();
         social.Cancel();
         foreach (var resident in residents)
@@ -230,16 +248,34 @@ internal sealed class CompanionHost : IDisposable
         RefreshMotion();
         bubble.Hide();
         if (settings.FriendsTogether) SocialBehavior.Gather(residents.Select(r => r.Bot).ToArray(), bot.Feet, displays);
-        if (!hidden && !fullscreen && !locked && !suspended)
+        if (!hidden && !fullscreen && !DesktopBlocked)
             foreach (var resident in residents) { resident.Overlay.Show(); resident.Overlay.RenderPosition(); }
     }
 
     private void Tick(object? sender, EventArgs e)
     {
         var now = clock.Elapsed.TotalSeconds;
+        if (now - lastMemorySave >= 20) SaveMemory();
         var elapsed = now - previous;
         previous = now;
-        var pointer = Native.Cursor();
+        if (locked || suspended)
+        {
+            TickWithoutDesktop(elapsed);
+            return;
+        }
+        if (readPointer() is not PointD pointer)
+        {
+            if (!inputUnavailable) { inputUnavailable = true; HideResidents(); }
+            TickWithoutDesktop(elapsed);
+            return;
+        }
+        if (inputUnavailable || displayRefreshPending)
+        {
+            inputUnavailable = false;
+            previousPointer = pointer;
+            lastMouseDown = false;
+            RecoverDisplays();
+        }
         foreach (var resident in residents) resident.Overlay.CheckDragRelease();
         var mouseDown = Native.LeftMouseDown;
         if (bubble.IsVisible && mouseDown && !lastMouseDown && !bubble.ContainsScreen(pointer))
@@ -255,7 +291,7 @@ internal sealed class CompanionHost : IDisposable
         {
             lastEnvironmentCheck = now;
             fullscreen = !smoke && settings.PauseForFullscreen && Native.Fullscreen(displays);
-            if (hidden || fullscreen || suspended || locked)
+            if (hidden || fullscreen || DesktopBlocked)
             {
                 HideResidents();
             }
@@ -263,7 +299,7 @@ internal sealed class CompanionHost : IDisposable
                 if (!resident.Overlay.IsVisible) { resident.Overlay.Show(); resident.Overlay.InvalidatePlacement(); }
         }
         var busy = now < busyUntil && now >= interactionUntil;
-        var invisible = hidden || fullscreen || suspended || locked;
+        var invisible = hidden || fullscreen || DesktopBlocked;
         social.Tick(elapsed, residents.Select(r => r.Bot).ToArray(), settings,
             invisible || busy || bubble.IsVisible || preferences is not null);
         foreach (var resident in residents)
@@ -278,8 +314,20 @@ internal sealed class CompanionHost : IDisposable
         }
         if (bubble.IsVisible && now >= bubbleUntil) bubble.Hide();
         var animated = residents.Any(r => r.Bot.Mood is not (Mood.Idle or Mood.Sleep or Mood.Sit or Mood.Focus));
-        timer.Interval = TimeSpan.FromMilliseconds(hidden || fullscreen || suspended || locked ? 250 :
+        timer.Interval = TimeSpan.FromMilliseconds(hidden || fullscreen || DesktopBlocked ? 250 :
             bubble.IsVisible ? 16 : bot.ReducedMotion || bot.Paused ? 200 : animated ? 16 : 100);
+    }
+
+    private void TickWithoutDesktop(double elapsed)
+    {
+        foreach (var resident in residents)
+        {
+            var paused = resident.Bot.Paused;
+            resident.Bot.Paused = true;
+            resident.Bot.Tick(elapsed, previousPointer, true);
+            resident.Bot.Paused = paused;
+        }
+        timer.Interval = TimeSpan.FromMilliseconds(250);
     }
 
     private void ToggleMenu(Companion companion)
@@ -289,7 +337,7 @@ internal sealed class CompanionHost : IDisposable
         menuBot = companion;
         bubble.Menu(companion, Interact, companion.TellJoke, ToggleFocus, ToggleHide, OpenSettings, NextMonitor,
             () => SelectCharacter((CharacterKind)(((int)settings.Character + 1) % Enum.GetValues<CharacterKind>().Length)),
-            ToggleFriends);
+            ToggleFriends, () => ShowPersonality(companion));
         bubble.Present(companion);
         bubbleUntil = clock.Elapsed.TotalSeconds + 18;
     }
@@ -298,7 +346,7 @@ internal sealed class CompanionHost : IDisposable
     {
         bubble.Hide();
         social.Cancel();
-        menuBot.Act(mood);
+        menuBot.UserAct(mood);
         interactionUntil = clock.Elapsed.TotalSeconds + 6;
         if (!settings.Muted && mood == Mood.Celebrate) System.Media.SystemSounds.Asterisk.Play();
     }
@@ -321,7 +369,7 @@ internal sealed class CompanionHost : IDisposable
     {
         hidden = !hidden;
         HideResidents();
-        if (!hidden && !fullscreen && !locked && !suspended)
+        if (!hidden && !fullscreen && !DesktopBlocked)
             foreach (var resident in residents) { resident.Overlay.Show(); resident.Overlay.RenderPosition(); }
         BuildTray();
     }
@@ -428,22 +476,212 @@ internal sealed class CompanionHost : IDisposable
     }
     private void Summon()
     {
+        if (DesktopBlocked || readPointer() is not PointD pointer) return;
         hidden = false;
         social.Cancel();
         bubble.Hide();
         foreach (var resident in residents) resident.Overlay.CancelInteraction();
-        SocialBehavior.Gather(residents.Select(r => r.Bot).ToArray(), Native.Cursor(), displays);
-        if (!fullscreen && !locked && !suspended)
+        SocialBehavior.Gather(residents.Select(r => r.Bot).ToArray(), pointer, displays);
+        if (!fullscreen && !DesktopBlocked)
             foreach (var resident in residents) { resident.Overlay.Show(); resident.Overlay.RenderPosition(); }
         BuildTray();
+    }
+
+    private async Task RunSessionSmoke(string output)
+    {
+        var checks = new List<string>();
+        void Check(bool valid, string label)
+        {
+            if (!valid) throw new InvalidOperationException("Session smoke check failed: " + label);
+            checks.Add(label);
+        }
+        var originalReader = readPointer;
+        var originalHidden = hidden;
+        try
+        {
+            settings.FriendsTogether = true;
+            hidden = false;
+            SyncFriends(true);
+            foreach (var resident in residents)
+            {
+                resident.Bot.Paused = true;
+                resident.Bot.StartFocus(1);
+            }
+            bot.StartDrag();
+            bot.Drag(new PointD(bot.Feet.X, bot.CurrentDisplay.Work.Top + 250));
+            readPointer = () => null;
+            Tick(null, EventArgs.Empty);
+            Check(inputUnavailable && residents.All(r => !r.Overlay.IsVisible) && !bubble.IsVisible,
+                "Pointer unavailable before lock notification hides all companions without crashing");
+            Check(bot.Mood != Mood.Drag && !overlay.IsMouseCaptured,
+                "Secure-desktop transition cancels active drag safely");
+            var focusBefore = bot.FocusRemaining;
+            previous = clock.Elapsed.TotalSeconds - 1;
+            Tick(null, EventArgs.Empty);
+            Check(bot.FocusRemaining < focusBefore && residents.All(r => !r.Overlay.IsVisible),
+                "Focus clocks continue while desktop pointer access is unavailable");
+            OnNativeEvent(0x02B1, new IntPtr(7));
+            var reads = 0;
+            readPointer = () => { reads++; return null; };
+            for (var i = 0; i < 4; i++) Tick(null, EventArgs.Empty);
+            RecoverDisplays();
+            Check(reads == 0 && displayRefreshPending,
+                "Locked ticks avoid desktop input entirely and defer monitor refresh");
+            OnNativeEvent(0x02B1, new IntPtr(8));
+            displayTimer.Stop();
+            Tick(null, EventArgs.Empty);
+            Check(inputUnavailable && residents.All(r => !r.Overlay.IsVisible),
+                "Unlock notification does not restore overlays before pointer access returns");
+            readPointer = originalReader;
+            Tick(null, EventArgs.Empty);
+            Check(!inputUnavailable && !displayRefreshPending && residents.All(r => r.Overlay.IsVisible),
+                "Input recovery refreshes monitor geometry and restores all companions");
+            Check(residents.All(r => r.Bot.CurrentDisplay.Work.Contains(r.Bot.Feet) && r.Bot.IsFocusing && r.Bot.Paused),
+                "Unlock recovery preserves focus and pause while keeping friends on-screen");
+            for (var i = 0; i < 3; i++)
+            {
+                OnNativeEvent(0x02B1, new IntPtr(7));
+                Tick(null, EventArgs.Empty);
+                OnNativeEvent(0x02B1, new IntPtr(8));
+                displayTimer.Stop();
+                RecoverDisplays();
+                Tick(null, EventArgs.Empty);
+            }
+            Check(residents.All(r => r.Overlay.IsVisible), "Repeated native lock/unlock notifications recover all friends");
+            hidden = true;
+            HideResidents();
+            readPointer = () => null;
+            Tick(null, EventArgs.Empty);
+            readPointer = originalReader;
+            Tick(null, EventArgs.Empty);
+            Check(hidden && residents.All(r => !r.Overlay.IsVisible), "Lock recovery respects the user's existing hidden preference");
+            hidden = false;
+            OnNativeEvent(0x0218, new IntPtr(4));
+            reads = 0;
+            readPointer = () => { reads++; return null; };
+            Tick(null, EventArgs.Empty);
+            Check(reads == 0 && residents.All(r => !r.Overlay.IsVisible), "Suspended ticks do not query inaccessible input");
+            OnNativeEvent(0x0218, new IntPtr(18));
+            displayTimer.Stop();
+            Tick(null, EventArgs.Empty);
+            Check(inputUnavailable, "Resume waits through temporary cursor unavailability");
+            readPointer = originalReader;
+            Tick(null, EventArgs.Empty);
+            Check(residents.All(r => r.Overlay.IsVisible), "Resume restores companions once input is ready");
+            var foreground = Native.GetForegroundWindow();
+            foreach (var resident in residents) resident.Bot.StopFocus();
+            await SmokeTests.CheckUnavailableDrag(overlay, bot, () => readPointer = () => null,
+                () => readPointer = originalReader);
+            Check(bot.Mood != Mood.Drag && !overlay.IsMouseCaptured,
+                "Mouse-up during pointer unavailability releases capture without a crash");
+            Check(Native.GetForegroundWindow() == foreground, "Session recovery and canceled dragging do not take keyboard focus");
+            var report = JsonNode.Parse(System.IO.File.ReadAllText(output))!.AsObject();
+            foreach (var check in checks) report["checks"]!.AsArray().Add(check);
+            report["sessionTransitionsSimulated"] = true;
+            System.IO.File.WriteAllText(output,
+                report.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
+        }
+        finally
+        {
+            readPointer = originalReader;
+            hidden = originalHidden;
+            locked = suspended = inputUnavailable = false;
+            displayTimer.Stop();
+        }
     }
     private void OpenSettings()
     {
         bubble.Hide();
         if (preferences is not null) { preferences.Activate(); return; }
-        preferences = new(settings, ApplySettings);
+        preferences = new(settings, ApplySettings, ForgetMemories);
         preferences.Closed += (_, _) => preferences = null;
         preferences.Show();
+    }
+
+    private void RunPersonalitySmoke(string output)
+    {
+        var checks = new List<string>();
+        void Check(bool valid, string label)
+        {
+            if (!valid) throw new InvalidOperationException("Personality smoke check failed: " + label);
+            checks.Add(label);
+        }
+        var folder = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(output)!, "memory-smoke-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(folder);
+        try
+        {
+            var store = new Storage(folder);
+            var testMemory = store.LoadMemory();
+            testMemory.Remember(CharacterKind.Byte, Interaction.Celebrate);
+            testMemory.NextJoke(CharacterKind.Pip, new Random(17), 8);
+            testMemory.CompleteScene(CharacterKind.Byte, CharacterKind.Orbit, FriendScene.Wave);
+            store.SaveMemory(testMemory);
+            store.Save(new Settings { Character = CharacterKind.Pip, Size = .85 });
+            var loaded = new Storage(folder).LoadMemory();
+            Check(loaded.For(CharacterKind.Byte).LastInteraction == Interaction.Celebrate &&
+                loaded.For(CharacterKind.Pip).RecentJokes.Count == 1 &&
+                loaded.Between(CharacterKind.Orbit, CharacterKind.Byte).SharedMoments == 1,
+                "Atomic local storage round-trips character memories and symmetric friendships");
+            Check(!System.IO.File.Exists(System.IO.Path.Combine(folder, "personality.json.tmp")),
+                "Successful memory save leaves no unfinished temporary file");
+            store.ForgetMemory();
+            Check(new Storage(folder).LoadMemory().Characters.Count == 0 && store.Load().Character == CharacterKind.Pip,
+                "Forgetting local memory removes only personality data, not preferences");
+            var path = System.IO.Path.Combine(folder, "personality.json");
+            System.IO.File.WriteAllText(path, "{broken memory");
+            var corrupt = new Storage(folder);
+            corrupt.LoadMemory();
+            Check(!corrupt.CanSaveMemory && corrupt.MemoryWarning is not null &&
+                System.IO.File.ReadAllText(path) == "{broken memory",
+                "Corrupt memory is reported and preserved rather than silently overwritten");
+            var rejected = false;
+            try { corrupt.SaveMemory(new()); }
+            catch (InvalidOperationException) { rejected = true; }
+            Check(rejected, "Autosave cannot replace unreadable memory without an explicit reset");
+            corrupt.ForgetMemory();
+            corrupt.SaveMemory(new());
+            Check(corrupt.CanSaveMemory && new Storage(folder).LoadMemory().Characters.Count == 0,
+                "Explicit forget restores normal saving after memory corruption");
+
+            settings.Character = CharacterKind.Byte;
+            settings.FriendsTogether = true;
+            SyncFriends(true);
+            memory.Remember(CharacterKind.Byte, Interaction.Nap);
+            memory.Remember(CharacterKind.Pip, Interaction.Celebrate);
+            SelectCharacter(CharacterKind.Pip);
+            Check(bot.Memory.For(bot.Kind).LastInteraction == Interaction.Celebrate &&
+                residents.All(r => ReferenceEquals(r.Bot.Memory, memory)),
+                "Character switching shares one store but keeps memories attached to identity");
+            var foreground = Native.GetForegroundWindow();
+            var speechCount = 0;
+            foreach (var resident in residents) resident.Bot.Speech += _ => speechCount++;
+            ShowPersonality(bot);
+            Check(bubble.IsVisible && memory.Describe(bot.Kind).Contains("Pip") &&
+                Native.GetForegroundWindow() == foreground,
+                "On-demand personality and friendship bubble opens without taking focus");
+            bubble.Hide();
+            var statusText = bubble.Content is System.Windows.Controls.Border border &&
+                border.Child is System.Windows.Controls.StackPanel panel &&
+                panel.Children.OfType<System.Windows.Controls.TextBlock>().Any(t => t.Text.Contains("Pip") && t.Text.Contains("Byte:"));
+            Check(statusText && speechCount == 0, "Personality bubble displays identity and friendship details without starting a conversation");
+            bot.StartFocusRemaining(37);
+            var focus = bot.FocusRemaining;
+            ForgetMemories();
+            Check(memory.Characters.Count == 0 && memory.Friendships.Count == 0 &&
+                bot.FocusRemaining == focus && settings.Character == CharacterKind.Pip,
+                "Forget control clears all profiles without changing the active character or focus timer");
+        }
+        finally
+        {
+            foreach (var name in new[] { "personality.json", "personality.json.tmp", "settings.json", "settings.json.tmp" })
+                System.IO.File.Delete(System.IO.Path.Combine(folder, name));
+            System.IO.Directory.Delete(folder);
+        }
+        var report = JsonNode.Parse(System.IO.File.ReadAllText(output))!.AsObject();
+        foreach (var check in checks) report["checks"]!.AsArray().Add(check);
+        report["personalityMemoryLocalOnly"] = true;
+        System.IO.File.WriteAllText(output,
+            report.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
     private void ApplySettings(Settings next)
     {
@@ -471,6 +709,41 @@ internal sealed class CompanionHost : IDisposable
     {
         Persist(() => settings.Character = kind);
         SyncFriends(false);
+    }
+
+    private void ShowPersonality(Companion companion)
+    {
+        bubble.Speech(memory.Describe(companion.Kind));
+        bubble.Present(companion);
+        bubbleUntil = clock.Elapsed.TotalSeconds + 18;
+    }
+
+    private void ForgetMemories()
+    {
+        if (!smoke) storage.ForgetMemory();
+        social.Cancel();
+        memory.Clear();
+        savedMemoryRevision = memory.Revision;
+        memorySaveFailed = false;
+    }
+
+    private void SaveMemory()
+    {
+        lastMemorySave = clock.Elapsed.TotalSeconds;
+        if (smoke || !storage.CanSaveMemory || savedMemoryRevision == memory.Revision) return;
+        try
+        {
+            storage.SaveMemory(memory);
+            savedMemoryRevision = memory.Revision;
+            memorySaveFailed = false;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            Storage.Log(ex);
+            if (!memorySaveFailed)
+                tray.ShowBalloonTip(5000, "Byte couldn't save its memories", ex.Message, Forms.ToolTipIcon.Error);
+            memorySaveFailed = true;
+        }
     }
     private void ToggleFriends()
     {
@@ -551,6 +824,7 @@ internal sealed class CompanionHost : IDisposable
         if (disposed) return;
         disposed = true;
         timer.Stop(); displayTimer.Stop(); hotkeys.Dispose();
+        SaveMemory();
         Native.WTSUnRegisterSessionNotification(overlay.Handle);
         tray.Visible = false;
         tray.ContextMenuStrip?.Dispose();

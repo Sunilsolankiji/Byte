@@ -107,7 +107,8 @@ legacy.Character = (CharacterKind)999;
 legacy.Validate();
 Check(legacy.Character == CharacterKind.Byte, "invalid character setting recovers safely");
 var groupSettings = new Settings { FriendsTogether = true, AutoInteractions = true };
-var group = Enum.GetValues<CharacterKind>().Select((kind, i) => new Companion(displays, groupSettings, i + 10) { Kind = kind }).ToArray();
+var groupMemory = new PersonalityMemory();
+var group = Enum.GetValues<CharacterKind>().Select((kind, i) => new Companion(displays, groupSettings, i + 10, groupMemory) { Kind = kind }).ToArray();
 SocialBehavior.Gather(group, new(-120, 100), displays);
 Check(group.All(c => c.CurrentDisplay.Id == "left" && left.Work.Contains(c.Feet)) &&
     group.Select(c => c.Feet.X).Distinct().Count() == 3, "group summon spaces distinct characters on negative mixed-DPI monitor");
@@ -122,9 +123,9 @@ for (var i = 0; i < 140; i++)
 {
     social.Tick(.05, group, groupSettings, false);
     foreach (var c in group) c.Tick(.05, default, false);
-    seenScene |= group.Any(c => c.IsSocial && c.Mood == Mood.HighFive);
+    seenScene |= group.Any(c => c.IsSocial && c.Mood == Mood.Wave);
 }
-Check(seenScene, "friends walk toward one another and perform a coordinated high-five");
+Check(seenScene, "new acquaintances approach and wave before unlocking familiar scenes");
 Check(group.All(c => left.Work.Contains(c.Feet)), "social choreography never leaves real monitor work area");
 social.Tick(.05, group, groupSettings, true);
 Check(!social.Active && group.All(c => !c.IsSocial), "busy input immediately cancels a social scene");
@@ -179,4 +180,5 @@ var small = new Display("small", new(0, 0, 340, 600), new(0, 0, 340, 560), 1.5);
 foreach (var c in group) c.UpdateDisplays(new[] { small });
 SocialBehavior.Gather(group, new(10000, 10000), new[] { small });
 Check(group.All(c => small.Work.Contains(c.Feet)), "group summon clamps safely on a narrow high-DPI work area");
+PersonalityTests.Run(Check, main);
 Console.WriteLine($"{count} checks passed.");

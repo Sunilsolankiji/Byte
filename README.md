@@ -30,6 +30,35 @@ Hide/show and summon affect the whole group, with room between friends when
 gathering. Focus applies to everyone; friends added midway inherit the remaining
 time. Turning group mode off keeps your selected character.
 
+## Personalities that remember
+
+No LLM is involved: a small, local decision model gives each friend preferences
+and remembers only its own interactions. **Byte** gravitates toward cables and
+building; **Pip** likes bugs and warming up by a CPU; **Orbit** prefers signs
+and code blocks. Recent celebrations, jokes, focus sessions, naps and gentle
+versus energetic tosses influence subsequent choices. Gentle landings get a
+character-specific reaction; energetic tossing earns a quiet recovery.
+
+Idle decisions exclude the character's last three autonomous activities
+(Quiet/reduced-motion mode alternates still poses instead). Requested jokes
+use a separate eight-joke deck per character, avoiding the previous seven
+even across restarts. A direct request still works regardless of that
+character's preferences.
+
+Nearby friends may silently acknowledge a celebration, notice a stumble, or
+settle down when a friend naps. Reactions are rate-limited, cannot trigger
+chains of reactions, and do not appear across different monitors. Shared
+encounters begin with getting acquainted; completed encounters grow into
+friendships and unlock high-fives, collaborative builds and quiet shared
+rests. Interrupted encounters earn no friendship, consecutive shared scenes
+do not repeat, and there is no penalty for being away.
+
+Click a character and choose **About this friend** to see its personality,
+most recent interaction and friendship levels. This is always on demand,
+never an unsolicited notification. **Preferences → Forget character memories**
+resets every character's recent activity/joke memory and friendships after
+confirmation, without changing settings or the running focus timer.
+
 ## Run
 
 Windows 11 x64. Extract **Byte-win-x64.zip** and run **Byte.exe**, or run
@@ -81,6 +110,12 @@ Display/work-area changes are debounced. Removed destinations cancel travel
 and recover to the nearest available display. DPI changes invalidate physical
 placement; a viewbox fits the vector character to the physical sprite rectangle.
 Session locking and sleep hide the overlay; unlock/resume refresh the layout.
+Windows can temporarily deny pointer access during a secure-desktop switch,
+even before a lock notification arrives. Byte treats that as unavailable input:
+it cancels dragging, hides the friends, and waits instead of exiting. Locked
+and suspended ticks do not query desktop input. Monitor refresh waits until
+input returns; focus clocks, pause state, and a manually hidden preference are
+preserved. A denied pointer read is logged once per unavailable interval.
 The overlay is never an all-desktop transparent window.
 
 ## Privacy and local files
@@ -94,6 +129,15 @@ are registered through Windows `RegisterHotKey`; there is no key-event stream.
 Future app-aware integrations would need separate opt-in permission UI.
 
 Settings: `%LOCALAPPDATA%\Byte\settings.json`.
+Character memory: `%LOCALAPPDATA%\Byte\personality.json` (three bounded
+profiles, the most recent interaction type, three recent activities, seven
+joke indices, and three pairwise friendship counters/last-scene types).
+No work content, interaction timestamps, pointer positions, event logs,
+personal identifiers or text entered by the user is stored in that file.
+Memories save only when changed, at most once every 20 seconds and on a normal
+quit. Forced termination can lose up to 20 seconds of recent play.
+An unreadable memory file is reported and preserved; fresh in-session
+memories are not saved over it until you explicitly forget/reset it.
 Errors: `%LOCALAPPDATA%\Byte\errors.log` (bounded, one rotated backup).
 Invalid settings are reported, not silently overwritten at startup. Changes
 are written atomically. Login launch is opt-in through the current-user
@@ -112,7 +156,8 @@ and 4 Hz while hidden, with no continuous background render loop. This avoids
 shipping a web runtime and lets the idle character use a small native overlay.
 
 - `Byte.Core`: platform-independent geometry, settings, physics, behavior and
-  bounded pairwise social choreography (`SocialBehavior.cs`).
+  bounded pairwise social choreography (`SocialBehavior.cs`); identity memory,
+  personality preferences and nonrepetition live in `PersonalityMemory.cs`.
 - `Byte.App\Character.cs`: original artwork and pose animation only.
 - `Byte.App\Native.cs`, `Overlay.cs`: native integration and pointer interaction.
 - `Byte.App\CompanionHost.cs`: app lifecycle, tray, timing, and orchestration.
@@ -147,6 +192,15 @@ message routing, lost-mouse-up recovery, solo/group switching, every friend's
 interaction menu, group focus/hide/summon, actual monitor placement and a monitor leap when two displays
 are attached. Synthetic layouts cover negative coordinates, mixed DPI, gaps,
 vertical stacking, disconnected destinations, focus timing, and safe tossing.
+Session regression checks inject pointer unavailability before/after simulated
+native lock/unlock and suspend/resume notifications, repeat recovery, and test
+a real captured drag whose release occurs with pointer access unavailable.
+These checks do not actually lock the user's workstation.
+Personality regressions cover measurable preferences, memory/history bounds,
+joke-deck persistence, friendship progression and scene cancellation, quiet
+contextual reactions, on-demand status, atomic local storage, and explicit
+reset/corrupt-file recovery. Native smoke uses isolated memory and temporary
+storage; it never changes your characters' real saved memories.
 
 **Hardware validation still required:** physically plug/unplug monitors during
 travel; change scaling while dragging; sleep/resume; lock/unlock; exercise

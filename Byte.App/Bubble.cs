@@ -43,7 +43,7 @@ internal sealed class Bubble : Window
     }
 
     public void Menu(Companion bot, Action<Mood> act, Action joke, Action focus, Action hide, Action settings, Action nextMonitor,
-        Action? switchCharacter = null, Action? toggleFriends = null)
+        Action? switchCharacter = null, Action? toggleFriends = null, Action? about = null)
     {
         var panel = new StackPanel { MinWidth = 178 };
         panel.Children.Add(Label(bot.Kind.ToString().ToUpperInvariant() + " / tiny desktop friend", 10, "#8EC8B7"));
@@ -54,6 +54,7 @@ internal sealed class Bubble : Window
         Add(bot.IsFocusing ? "End focus timer" : $"Focus with me · {bot.Settings.FocusMinutes} min", focus);
         Add("Take a nap", () => act(Mood.Sleep));
         Add("Hop to next monitor", nextMonitor);
+        if (about is not null) Add("About this friend", about);
         if (switchCharacter is not null) Add("Switch character", switchCharacter);
         if (toggleFriends is not null) Add(bot.Settings.FriendsTogether ? "Just one character" : "Bring friends together", toggleFriends);
         Add("Settings", settings);

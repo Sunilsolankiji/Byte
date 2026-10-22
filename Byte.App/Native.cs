@@ -33,7 +33,7 @@ internal static class Native
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] internal static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)] internal static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
-    [DllImport("user32.dll")] internal static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll", SetLastError = true)] internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] internal static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] internal static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] private static extern IntPtr GetShellWindow();
@@ -67,6 +67,22 @@ internal static class Native
     }
 
     private static RectD ToRect(Rect r) => new(r.Left, r.Top, r.Right, r.Bottom);
+    private static bool cursorUnavailable;
+    public static PointD? ReadCursor()
+    {
+        // GetCursorPos can fail during a secure-desktop switch, even before WTS_SESSION_LOCK arrives.
+        if (!GetCursorPos(out var point))
+        {
+            var error = Marshal.GetLastWin32Error();
+            if (!cursorUnavailable)
+                Storage.Log(new Win32Exception(error, "Desktop pointer access is temporarily unavailable. Byte is waiting for the input desktop to return."));
+            cursorUnavailable = true;
+            return null;
+        }
+        cursorUnavailable = false;
+        return new(point.X, point.Y);
+    }
+
     public static PointD Cursor()
     {
         if (!GetCursorPos(out var point)) throw new Win32Exception();

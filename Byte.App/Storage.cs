@@ -9,11 +9,16 @@ namespace Byte.App;
 internal sealed class Storage
 {
     public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Byte");
-    public static string SettingsPath => Path.Combine(Folder, "settings.json");
+    private readonly string folder;
+    private string SettingsPath => Path.Combine(folder, "settings.json");
+    private string MemoryPath => Path.Combine(folder, "personality.json");
     public string? Warning { get; private set; }
+    public string? MemoryWarning { get; private set; }
+    public bool CanSaveMemory { get; private set; } = true;
+    public Storage(string? folder = null) => this.folder = folder ?? Folder;
     public Settings Load()
     {
-        Directory.CreateDirectory(Folder);
+        Directory.CreateDirectory(folder);
         if (!File.Exists(SettingsPath)) return new();
         try
         {
@@ -32,10 +37,47 @@ internal sealed class Storage
 
     public void Save(Settings settings)
     {
-        Directory.CreateDirectory(Folder);
-        var temp = SettingsPath + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
-        File.Move(temp, SettingsPath, true);
+        WriteAtomic(SettingsPath, settings);
+    }
+
+    public PersonalityMemory LoadMemory()
+    {
+        if (!File.Exists(MemoryPath)) return new();
+        try
+        {
+            var memory = JsonSerializer.Deserialize<PersonalityMemory>(File.ReadAllText(MemoryPath))
+                ?? throw new JsonException("Personality memory was empty.");
+            memory.Validate();
+            return memory;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            Log(ex);
+            CanSaveMemory = false;
+            MemoryWarning = "Byte couldn't read its personality memory. Fresh session memory is in use; the saved file is untouched. Use Forget memories in Preferences to reset it.";
+            return new();
+        }
+    }
+
+    public void SaveMemory(PersonalityMemory memory)
+    {
+        if (!CanSaveMemory) throw new InvalidOperationException("Unreadable personality memory must be explicitly reset before saving.");
+        WriteAtomic(MemoryPath, memory);
+    }
+
+    public void ForgetMemory()
+    {
+        File.Delete(MemoryPath);
+        CanSaveMemory = true;
+        MemoryWarning = null;
+    }
+
+    private void WriteAtomic<T>(string path, T value)
+    {
+        Directory.CreateDirectory(folder);
+        var temp = path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(temp, path, true);
     }
 
     public static void SetStartup(bool enabled)
