@@ -1,0 +1,61 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test core and publish portable app
+        shell: powershell
+        run: .\build.ps1 -SkipNativeSmoke
+      - name: Install verified installer compiler
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.1-x64.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_1/innosetup-7.1.1-x64.exe' -OutFile $download -UseBasicParsing
+          if ((Get-FileHash $download -Algorithm SHA256).Hash.ToLowerInvariant() -ne '8a5a6711c3766a6e5fb74f280ba0e3551e719ce94538d901fdbd1f8f9920b3f0') {
+            throw 'Compiler SHA256 mismatch.'
+          }
+          $signature = Get-AuthenticodeSignature $download
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys') {
+            throw 'Compiler publisher signature is invalid.'
+          }
+          $target = Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 7'
+          $process = Start-Process $download -ArgumentList @('/CURRENTUSER', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', ("/DIR=`"$target`"")) -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Compiler installation failed: $($process.ExitCode)" }
+          Remove-Item -LiteralPath $download
+      - name: Build unsigned installer and checksums
+        shell: powershell
+        run: .\build-installer.ps1
+      - name: Upload unsigned build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Byte-unsigned-${{ github.sha }}
+          path: |
+            dist/Byte-win-x64.zip
+            dist/Byte-Setup-*-win-x64.exe
+            dist/SHA256SUMS.txt
+            artifacts/core-tests.txt
+          if-no-files-found: error
+          retention-days: 14

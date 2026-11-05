@@ -208,6 +208,13 @@ shipping a web runtime and lets the idle character use a small native overlay.
 
 ## Build and verify
 
+The **[Windows build workflow](https://github.com/Sunilsolankiji/Byte/actions/workflows/build.yml)**
+builds from the checked-out source on GitHub Actions, runs core regressions,
+and uploads unsigned portable/installer artifacts and checksums. Native
+desktop and installer lifecycle smoke tests remain local checks: hosted CI
+does not claim to verify interactive click-through or physical display behavior.
+The workflow does not sign or publish releases automatically.
+
 Install the .NET 8 SDK, then in PowerShell:
 
 ```powershell
@@ -269,3 +276,38 @@ travel; change scaling while dragging; sleep/resume; lock/unlock; exercise
 fullscreen games and presentation software. Synthetic tests and injected
 native messages do not prove those physical transitions. This MVP supports
 Windows 11 x64 only, not macOS/Linux, and does not include code signing.
+
+## Code signing policy
+
+**Status: preparation for a SignPath Foundation application; not approved or
+active. Current downloads are unsigned.** No SignPath certificate or signing
+service is configured, and this project does not yet claim SignPath sponsorship.
+
+The requested service is **free code signing provided by
+[SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org)**, subject to their approval and
+[conditions](https://signpath.org/terms). If accepted, the certificate publisher
+will be SignPath Foundation rather than the individual maintainer.
+
+- Author/committer: [Sunilsolankiji](https://github.com/Sunilsolankiji).
+- Reviewer for proposed external contributions: [Sunilsolankiji](https://github.com/Sunilsolankiji).
+- Release signing approver: [Sunilsolankiji](https://github.com/Sunilsolankiji).
+
+The maintainer has confirmed GitHub two-factor authentication is enabled.
+SignPath access must also use MFA when provisioned. External contributions,
+including build and signing configuration changes, require maintainer review.
+Every future signing request requires explicit maintainer approval; a build
+or pull request alone must never authorize signing.
+
+Only project-owned binaries built from reviewed source in this repository may
+be submitted for signing. Upstream runtimes/components must not be signed as
+Byte's own code. Product name and version restrictions and verifiable GitHub
+Actions artifact provenance must be enforced in the approved signing
+configuration before signed releases can be published.
+
+**Privacy policy:** Byte does not transfer information to networked systems.
+It has no networking code, telemetry, screen capture, code/typing inspection
+or microphone access. Its local observations and files are described in
+[Privacy and local files](#privacy-and-local-files). GitHub Actions and any
+future SignPath integration are maintainer-side build/signing services, not
+services used by the installed application.
