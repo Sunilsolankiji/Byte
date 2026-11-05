@@ -85,6 +85,12 @@ If Windows cannot read counters, Byte reports the error and retries after
 
 ## Run
 
+**Microsoft Store status:** a listing named **Byte - Windows desktop companion**
+has been reserved, but it is not submitted, certified or publicly available yet.
+The source supports full-trust MSIX packaging; do not treat a locally built
+unsigned `.msix` as a trusted public download. Microsoft signs the package
+after Store certification, not the existing GitHub EXE/ZIP.
+
 Download the installer or portable ZIP from
 **[GitHub Releases](https://github.com/Sunilsolankiji/Byte/releases/latest)**.
 
@@ -187,6 +193,14 @@ are written atomically. Login launch is opt-in through the current-user
 To uninstall, disable login launch, quit from the tray, delete the portable
 folder, and optionally delete `%LOCALAPPDATA%\Byte`.
 
+The MSIX edition instead stores these files in Windows' package-scoped
+`%LOCALAPPDATA%\Packages\<package-family-name>\LocalState` folder and uses a
+Windows-managed startup task rather than the registry Run entry. That task is
+disabled by default, enabled only by your explicit preference, and respects a
+Windows user/policy startup block. Store updates retain package-local data;
+Windows uninstall/reset removes that package's data. Portable/installer
+preferences and memories are not imported automatically or modified by MSIX.
+
 ## Stack and source
 
 **C# / .NET 8 WPF + small Win32 interop**, targeting Windows 11 first:
@@ -239,6 +253,41 @@ and uninstall. Quit Byte first and use an account without an installed Byte.
 It uses a unique temporary install directory, preserves existing preferences
 and memories, restores the login entry after its checks, and writes
 `artifacts\installer-smoke.json`.
+
+### Microsoft Store / MSIX preparation
+
+Install the Windows SDK with MakeAppx and SignTool. Run `.\build.ps1`, then
+`.\build-msix.ps1 -Store` to create
+`dist\Byte-<version>-win-x64-store-upload.msix`. The exact reserved Partner
+Center identity is stored in `msix\StoreIdentity.json`; verify it against
+Partner Center before every first submission or ownership change. Explicit
+`-IdentityName`, `-Publisher`, `-PublisherDisplayName` and `-DisplayName` parameters
+can also be supplied instead of `-Store`.
+
+This package is for upload to Partner Center, **not direct public installation**.
+The manifest declares `runFullTrust` because WPF/Win32 desktop overlays, tray
+controls, monitor APIs and global registered shortcuts need normal desktop
+process access. No elevation, screen capture, typing inspection, network or
+microphone capability is added. The Store submission must explain this
+capability and still pass Microsoft's policy/certification review.
+
+For local checks use `.\build-msix.ps1 -TestPackage` and, with Byte closed,
+`.\test-msix.ps1`. The test uses a separate `Byte.LocalTest` identity, a
+short-lived self-signed test certificate and a temporary installation; it
+never uploads a package. On systems requiring machine-level trust,
+`.\test-msix.ps1 -MachineTrust` explicitly requests administrator approval
+to temporarily add the exact test certificate to TrustedPeople and requests
+approval again to remove it. No test root CA is installed. Do not decline the
+cleanup prompt. Temporary trust, private certificate, signed test copy and
+installed package are removed afterward. A failed cleanup is an error, not
+a successful validation.
+
+The test activates the actual packaged app, runs the native overlay checks,
+verifies package identity, package-local storage, and explicit startup
+enable/disable, and checks that portable startup registration is unchanged.
+It writes `artifacts\msix-native-smoke.json`. These checks are not Microsoft
+Store certification. CI validates packing under the local test identity,
+but does not install it or change certificate trust.
 
 **Native smoke tests temporarily move the pointer and inject clicks** into
 Byte and a dedicated test window in a separate process; don't use the pointer

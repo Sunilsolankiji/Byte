@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Byte.Core;
 using Microsoft.Win32;
 
@@ -8,7 +9,8 @@ namespace Byte.App;
 
 internal sealed class Storage
 {
-    public static string Folder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Byte");
+    public static string Folder => PackageIntegration.IsPackaged ? PackageIntegration.LocalFolder :
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Byte");
     private readonly string folder;
     private string SettingsPath => Path.Combine(folder, "settings.json");
     private string MemoryPath => Path.Combine(folder, "personality.json");
@@ -89,6 +91,13 @@ internal sealed class Storage
             key.SetValue("ByteDesktopCompanion", "\"" + exe + "\"");
         }
         else key.DeleteValue("ByteDesktopCompanion", false);
+    }
+
+    public static Task SetStartupAsync(bool enabled)
+    {
+        if (PackageIntegration.IsPackaged) return PackageIntegration.SetStartup(enabled);
+        SetStartup(enabled);
+        return Task.CompletedTask;
     }
 
     public static void Log(Exception ex)

@@ -72,7 +72,7 @@ internal sealed class CompanionHost : IDisposable
             Storage.Log(ex);
             warning = "Byte's hotkeys are unavailable. Use tray Preferences to choose new shortcuts.";
         }
-        if (settings.LaunchAtLogin && !smoke)
+        if (settings.LaunchAtLogin && !smoke && !PackageIntegration.IsPackaged)
         {
             try { Storage.SetStartup(true); }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
@@ -112,6 +112,7 @@ internal sealed class CompanionHost : IDisposable
                     await RunSessionSmoke(output);
                     RunPersonalitySmoke(output);
                     await RunCpuSmoke(output);
+                    await RunPackageSmoke(output);
                     Application.Current.Shutdown(0);
                 }
                 catch (Exception ex)
@@ -127,6 +128,61 @@ internal sealed class CompanionHost : IDisposable
         }
         else if (warning is not null)
             tray.ShowBalloonTip(7000, "Byte · settings need attention", warning, Forms.ToolTipIcon.Warning);
+        if (PackageIntegration.IsPackaged && !smoke) _ = RefreshPackagedStartup();
+    }
+
+    private async Task RefreshPackagedStartup()
+    {
+        try { settings.LaunchAtLogin = await PackageIntegration.StartupEnabled(); }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
+        {
+            Storage.Log(ex);
+            if (!disposed) tray.ShowBalloonTip(5000, "Byte startup setting unavailable", ex.Message, Forms.ToolTipIcon.Warning);
+        }
+    }
+
+    private async Task RunPackageSmoke(string output)
+    {
+        if (!PackageIntegration.IsPackaged) return;
+        var checks = new List<string>();
+        void Check(bool valid, string label)
+        {
+            if (!valid) throw new InvalidOperationException("MSIX smoke check failed: " + label);
+            checks.Add(label);
+        }
+        Check(Windows.ApplicationModel.Package.Current.Id.Name == "Byte.LocalTest",
+            "Native smoke is running with real local-test MSIX package identity");
+        Check(Storage.Folder == Windows.Storage.ApplicationData.Current.LocalFolder.Path,
+            "Packaged settings use the package-scoped Windows LocalState folder");
+        Check(!await PackageIntegration.StartupEnabled(), "MSIX startup task is disabled by default");
+        try
+        {
+            await Storage.SetStartupAsync(true);
+            Check(await PackageIntegration.StartupEnabled(), "Explicit opt-in enables the Windows-managed startup task");
+        }
+        finally { await Storage.SetStartupAsync(false); }
+        Check(!await PackageIntegration.StartupEnabled(), "Opt-out disables the Windows-managed startup task");
+        var folder = System.IO.Path.Combine(Storage.Folder, "smoke-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new Storage(folder);
+            store.Save(new Settings { CpuReactions = true });
+            store.SaveMemory(new PersonalityMemory());
+            Check(store.Load().CpuReactions && store.LoadMemory().Characters.Count == 0,
+                "Real packaged settings and personality files round-trip through atomic storage");
+        }
+        finally
+        {
+            System.IO.File.Delete(System.IO.Path.Combine(folder, "settings.json"));
+            System.IO.File.Delete(System.IO.Path.Combine(folder, "personality.json"));
+            System.IO.Directory.Delete(folder);
+        }
+        var report = JsonNode.Parse(System.IO.File.ReadAllText(output))!.AsObject();
+        foreach (var check in checks) report["checks"]!.AsArray().Add(check);
+        report["msixPackageIdentityVerified"] = true;
+        report["packageFamilyName"] = Windows.ApplicationModel.Package.Current.Id.FamilyName;
+        System.IO.File.WriteAllText(output,
+            report.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
 
     private static void Dispatch(Action action) => Application.Current.Dispatcher.Invoke(action);
@@ -845,19 +901,20 @@ internal sealed class CompanionHost : IDisposable
         System.IO.File.WriteAllText(output,
             report.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
     }
-    private void ApplySettings(Settings next)
+    private async Task ApplySettings(Settings next)
     {
         next.Validate();
         hotkeys.Set(next.SummonHotkey, next.HideHotkey);
         try
         {
-            Storage.SetStartup(next.LaunchAtLogin);
+            await Storage.SetStartupAsync(next.LaunchAtLogin);
             storage.Save(next);
         }
-        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException
+            or System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
             hotkeys.Set(settings.SummonHotkey, settings.HideHotkey);
-            Storage.SetStartup(settings.LaunchAtLogin);
+            await Storage.SetStartupAsync(settings.LaunchAtLogin);
             throw;
         }
         foreach (var property in typeof(Settings).GetProperties()) property.SetValue(settings, property.GetValue(next));

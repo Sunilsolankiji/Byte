@@ -48,6 +48,9 @@ jobs:
       - name: Build unsigned installer and checksums
         shell: powershell
         run: .\build-installer.ps1
+      - name: Validate local-identity MSIX packaging
+        shell: powershell
+        run: .\build-msix.ps1 -TestPackage
       - name: Upload unsigned build artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

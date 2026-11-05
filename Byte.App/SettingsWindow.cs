@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -8,7 +9,7 @@ namespace Byte.App;
 
 internal sealed class SettingsWindow : Window
 {
-    public SettingsWindow(Settings original, Action<Settings> save, Action forgetMemories)
+    public SettingsWindow(Settings original, Func<Settings, Task> save, Action forgetMemories)
     {
         Title = "Byte · preferences";
         Width = 420; Height = 670;
@@ -88,8 +89,10 @@ internal sealed class SettingsWindow : Window
         var apply = new Button { Content = "Save", Padding = new Thickness(18, 6, 18, 6), IsDefault = true };
         buttons.Children.Add(cancel); buttons.Children.Add(apply); panel.Children.Add(buttons);
         cancel.Click += (_, _) => Close();
-        apply.Click += (_, _) =>
+        apply.Click += async (_, _) =>
         {
+            apply.IsEnabled = false;
+            cancel.IsEnabled = false;
             try
             {
                 if (!int.TryParse(focus.Text, out var minutes) || minutes < 1 || minutes > 180)
@@ -105,15 +108,16 @@ internal sealed class SettingsWindow : Window
                     LaunchAtLogin = startup.IsChecked == true, Muted = muted.IsChecked == true,
                     SummonHotkey = summon.Text.Trim(), HideHotkey = hide.Text.Trim(), FocusMinutes = minutes
                 };
-                save(next);
+                await save(next);
                 Close();
             }
-            catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception or
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.Runtime.InteropServices.COMException or System.ComponentModel.Win32Exception or
                 System.IO.IOException or UnauthorizedAccessException or System.Security.SecurityException)
             {
                 Storage.Log(ex);
                 error.Text = ex.Message;
             }
+            finally { apply.IsEnabled = true; cancel.IsEnabled = true; }
         };
         void Label(string text) => panel.Children.Add(new TextBlock { Text = text, Margin = new Thickness(0, 9, 0, 4), FontSize = 12 });
         CheckBox Check(string title, bool value)
