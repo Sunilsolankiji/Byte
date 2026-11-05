@@ -85,11 +85,26 @@ If Windows cannot read counters, Byte reports the error and retries after
 
 ## Run
 
-Windows 11 x64. Extract **Byte-win-x64.zip** and run **Byte.exe**, or run
+Download the installer or portable ZIP from
+**[GitHub Releases](https://github.com/Sunilsolankiji/Byte/releases/latest)**.
+
+**Install (Windows 11 x64):** run **Byte-Setup-1.3.0-win-x64.exe**. It installs
+for your Windows account under `%LOCALAPPDATA%\Programs\Byte`, adds a Start menu
+shortcut, and offers an optional desktop shortcut. No administrator access
+is needed. Launch at login remains opt-in in Byte's Preferences. Quit any
+running Byte from its tray menu before installing an update or uninstalling.
+Remove it through Windows **Settings > Apps > Installed apps > Byte**.
+Uninstalling preserves your local preferences and character memories; it
+removes a login entry only if it points to this installed copy.
+
+**Portable:** extract **Byte-win-x64.zip** and run **Byte.exe**, or run
 `dist\Byte\Byte.exe` directly. The self-contained portable build includes its
 .NET runtime; neither an SDK nor an installer is required on the destination PC.
 Keep the executable in a stable location before enabling launch at login.
-This is an unsigned local build, so Windows may show a reputation warning.
+The app and installer are unsigned, so Windows may show a SmartScreen reputation
+warning. Download only from this repository's Releases page and use the
+included **SHA256SUMS.txt** to check file integrity. Checksums do not replace
+code signing.
 
 - Click Byte for its small menu; double-click to celebrate.
 - Drag the character and release to gently toss it. It lands above the taskbar.
@@ -204,6 +219,20 @@ runs native smoke checks, and creates `dist\Byte-win-x64.zip`. For a build
 machine without an interactive desktop, use `.\build.ps1 -SkipNativeSmoke`.
 That skips native verification, not core tests.
 
+To build the per-user installer, install [Inno Setup 6.3 or later](https://jrsoftware.org/isdl.php),
+then run `.\build-installer.ps1`. Pass `-Compiler 'C:\path\to\ISCC.exe'` if it is
+not found automatically. The script verifies the published version and produces
+`dist\Byte-Setup-<version>-win-x64.exe` and `dist\SHA256SUMS.txt` for both release
+downloads. The installer bundles the self-contained app, so installation and
+normal operation need no runtime download or internet connection.
+
+`.\test-installer.ps1` checks a silent per-user install, in-place reinstall,
+shortcuts, Installed apps registration, executable integrity/native startup
+and uninstall. Quit Byte first and use an account without an installed Byte.
+It uses a unique temporary install directory, preserves existing preferences
+and memories, restores the login entry after its checks, and writes
+`artifacts\installer-smoke.json`.
+
 **Native smoke tests temporarily move the pointer and inject clicks** into
 Byte and a dedicated test window in a separate process; don't use the pointer
 during the approximately 30-second run. The pointer is restored and the test
@@ -239,4 +268,4 @@ not a screen capture.
 travel; change scaling while dragging; sleep/resume; lock/unlock; exercise
 fullscreen games and presentation software. Synthetic tests and injected
 native messages do not prove those physical transitions. This MVP supports
-Windows x64 only, not macOS/Linux, and does not include signing or an installer.
+Windows 11 x64 only, not macOS/Linux, and does not include code signing.
