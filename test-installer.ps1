@@ -81,17 +81,21 @@ try {
         Check ($hash -eq $savedFiles[$path]) ('Install/uninstall preserves ' + (Split-Path $path -Leaf))
     }
     New-Item -ItemType Directory (Join-Path $PSScriptRoot 'artifacts') -Force | Out-Null
-    [pscustomobject]@{ passed = $true; checks = @($checks); installer = Split-Path $Installer -Leaf } |
+    [pscustomobject]@{ passed = $true; checks = $checks.ToArray(); installer = Split-Path $Installer -Leaf } |
         ConvertTo-Json -Depth 3 | Set-Content (Join-Path $PSScriptRoot 'artifacts\installer-smoke.json')
     Write-Output ("Installer smoke: " + $checks.Count + ' checks passed.')
 }
 finally {
-    if ($probe -and !$probe.HasExited) { Stop-Process -Id $probe.Id }
-    if (Test-Path (Join-Path $folder 'unins000.exe')) { Run-Uninstall }
-    if ($hadStartup) { Set-ItemProperty $startupKey -Name $startupName -Value $startup }
-    else { Remove-ItemProperty $startupKey -Name $startupName -ErrorAction SilentlyContinue }
-    foreach ($path in @($probePath, "$probePath.clicks")) {
-        if (Test-Path $path) { Remove-Item -LiteralPath $path }
+    try {
+        if ($probe -and !$probe.HasExited) { Stop-Process -Id $probe.Id }
+        if (Test-Path (Join-Path $folder 'unins000.exe')) { Run-Uninstall }
     }
-    if ((Test-Path $folder) -and !(Get-ChildItem $folder -Force)) { Remove-Item -LiteralPath $folder }
+    finally {
+        if ($hadStartup) { Set-ItemProperty $startupKey -Name $startupName -Value $startup }
+        else { Remove-ItemProperty $startupKey -Name $startupName -ErrorAction SilentlyContinue }
+        foreach ($path in @($probePath, "$probePath.clicks")) {
+            if (Test-Path $path) { Remove-Item -LiteralPath $path }
+        }
+        if ((Test-Path $folder) -and !(Get-ChildItem $folder -Force)) { Remove-Item -LiteralPath $folder }
+    }
 }

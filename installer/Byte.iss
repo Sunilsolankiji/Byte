@@ -26,7 +26,7 @@ OutputBaseFilename=Byte-Setup-{#ByteVersion}-win-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-DisableProgramGroupPage=yes
+DisableProgramGroupPage=no
 SetupLogging=yes
 
 [Tasks]
