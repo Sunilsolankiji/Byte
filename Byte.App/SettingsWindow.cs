@@ -45,6 +45,12 @@ internal sealed class SettingsWindow : Window
         var reduced = Check("Reduce motion (no roaming or animated flourishes)", original.ReducedMotion);
         var systemMotion = Check("Also respect Windows animation settings", original.RespectSystemReducedMotion);
         var pointer = Check("Occasional pointer play (never during focus)", original.PointerPlay);
+        var cpu = Check("React to overall CPU usage (opt-in)", original.CpuReactions);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Reads aggregate Windows CPU load every 2 seconds.\nNo process names, work content, history or network access.",
+            FontSize = 10, Foreground = Brushes.DarkSlateGray, Margin = new Thickness(0, 4, 0, 0)
+        });
         var fullscreen = Check("Automatically hide during fullscreen work", original.PauseForFullscreen);
         var startup = Check("Launch at login", original.LaunchAtLogin);
         var muted = Check("Mute interaction sounds", original.Muted);
@@ -93,6 +99,7 @@ internal sealed class SettingsWindow : Window
                     Activity = (ActivityLevel)activity.SelectedItem, Size = size.Value,
                     Character = (CharacterKind)character.SelectedItem, FriendsTogether = together.IsChecked == true,
                     AutoInteractions = social.IsChecked == true,
+                    CpuReactions = cpu.IsChecked == true,
                     ReducedMotion = reduced.IsChecked == true, RespectSystemReducedMotion = systemMotion.IsChecked == true,
                     PointerPlay = pointer.IsChecked == true, PauseForFullscreen = fullscreen.IsChecked == true,
                     LaunchAtLogin = startup.IsChecked == true, Muted = muted.IsChecked == true,

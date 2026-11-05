@@ -181,4 +181,5 @@ foreach (var c in group) c.UpdateDisplays(new[] { small });
 SocialBehavior.Gather(group, new(10000, 10000), new[] { small });
 Check(group.All(c => small.Work.Contains(c.Feet)), "group summon clamps safely on a narrow high-DPI work area");
 PersonalityTests.Run(Check, main);
+CpuTests.Run(Check, main);
 Console.WriteLine($"{count} checks passed.");

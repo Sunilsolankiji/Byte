@@ -48,6 +48,14 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)] internal static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
     [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetSystemTimes(out ulong idle, out ulong kernel, out ulong user);
+    public static CpuTimes ReadCpuTimes()
+    {
+        if (!GetSystemTimes(out var idle, out var kernel, out var user))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not read aggregate CPU times.");
+        return new(idle, kernel, user);
+    }
     public static bool LeftMouseDown => (GetAsyncKeyState(0x01) & 0x8000) != 0;
 
     public static List<Display> Displays()

@@ -46,6 +46,7 @@ internal sealed class Character : FrameworkElement
         new Rect(28, 43, 99, 91).Contains(p) ||
         new Rect(10, 76, 134, 49).Contains(p) ||
         new Rect(39, 129, 78, 38).Contains(p) ||
+        Bot.Mood == Mood.CpuBusy && new Rect(103, 128, 43, 35).Contains(p) ||
         new Rect(67, 10, 35, 36).Contains(p) ||
         Bot.Kind == CharacterKind.Pip && (new Rect(30, 25, 28, 35).Contains(p) || new Rect(98, 25, 28, 35).Contains(p)) ||
         Bot.Kind == CharacterKind.Orbit && new Rect(16, 98, 122, 25).Contains(p);
@@ -131,7 +132,7 @@ internal sealed class Character : FrameworkElement
             dc.DrawRoundedRectangle(Ink, null, new(65, 41, 25, 8), 4, 4);
         }
 
-        var handsUp = mood is Mood.Celebrate or Mood.Stretch or Mood.Fall;
+        var handsUp = mood is Mood.Celebrate or Mood.Stretch or Mood.Fall or Mood.CpuRelax;
         for (var i = 0; i < 2; i++)
         {
             var x = i == 0 ? 28 : 126;
@@ -154,7 +155,14 @@ internal sealed class Character : FrameworkElement
         for (var scan = 65; scan < 114; scan += 4) Line(dc, new Pen(Screen, 1), 42, scan, 112, scan);
         dc.Pop();
         var blink = !reduced && (t % 6.3 > 6.13);
-        if (mood == Mood.Sleep)
+        if (mood == Mood.CpuBusy)
+        {
+            Line(dc, Light, 49, 83, 62, 79);
+            Line(dc, Light, 92, 79, 105, 83);
+            Line(dc, new Pen(Mint, 2), 70, 100, 84, 100);
+            Text(dc, ">>", 70, 64, 8, Gold);
+        }
+        else if (mood is Mood.Sleep or Mood.CpuRelax)
         {
             Line(dc, Light, 49, 83, 62, 83);
             Line(dc, Light, 91, 83, 104, 83);
@@ -197,6 +205,11 @@ internal sealed class Character : FrameworkElement
                 Line(dc, new Pen(Mint, 2), 76, 102, 84, 98);
             }
         }
+        if (Bot.Kind == CharacterKind.Orbit && mood is Mood.CpuBusy or Mood.CpuRelax)
+        {
+            dc.DrawEllipse(shell, Outline, new(77, 121), 59, 10);
+            for (var i = 0; i < 5; i++) dc.DrawEllipse(i % 2 == 0 ? Gold : Mint, null, new(40 + i * 18, 122), 3, 2);
+        }
         dc.DrawEllipse(Gold, null, new(45, 124), 2, 2);
         Text(dc, Bot.Kind switch { CharacterKind.Pip => ":3", CharacterKind.Orbit => "*", _ => ">_" }, 68, 119, 8, Ink);
         for (var i = 0; i < 3; i++) Line(dc, new Pen(Dim, 1), 100 + i * 4, 122, 100 + i * 4, 126);
@@ -215,6 +228,16 @@ internal sealed class Character : FrameworkElement
         dc.Pop(); dc.Pop(); dc.Pop();
 
         if (mood == Mood.Sleep) Text(dc, "z", 117, 29 - (reduced ? 0 : t % 3 * 4), 16, Mint);
+        if (mood == Mood.CpuBusy)
+        {
+            dc.DrawRoundedRectangle(Gold, Outline, new(105, 137, 39, 24), 4, 4);
+            Text(dc, "CPU", 115, 143, 10, Ink);
+            for (var i = 0; i < 3; i++)
+            {
+                var height = reduced ? 5 : 3 + (Math.Sin(t * 4 + i) + 1) * 3;
+                dc.DrawRectangle(Coral, null, new(110 + i * 11, 137 - height, 6, height));
+            }
+        }
         if (mood == Mood.Sign)
         {
             Line(dc, Wire, 128, 117, 128, 82);

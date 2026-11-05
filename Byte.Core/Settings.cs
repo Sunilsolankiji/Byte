@@ -20,6 +20,7 @@ public sealed class Settings
     public CharacterKind Character { get; set; } = CharacterKind.Byte;
     public bool FriendsTogether { get; set; }
     public bool AutoInteractions { get; set; } = true;
+    public bool CpuReactions { get; set; }
 
     public void Validate()
     {

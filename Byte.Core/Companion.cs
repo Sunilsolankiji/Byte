@@ -8,7 +8,7 @@ public enum Mood
 {
     Idle, Walk, Sit, Peek, Sleep, Windup, Leap, Landing, Drag, Fall,
     Celebrate, Inspect, Sign, Cable, Bug, Warm, Blocks, Focus, Stretch, Trip,
-    Approach, Wave, HighFive
+    Approach, Wave, HighFive, CpuBusy, CpuRelax
 }
 
 public sealed class Companion
@@ -121,6 +121,19 @@ public sealed class Companion
     public void EndReaction()
     {
         if (IsReacting) Enter(IsFocusing ? Mood.Focus : Mood.Idle);
+    }
+
+    public bool ReactToCpu(CpuReaction reaction)
+    {
+        if (!Settings.CpuReactions || Settings.Activity == ActivityLevel.Quiet ||
+            !CanSocialize || IsSocial || IsReacting || pendingDisplay is not null) return false;
+        Act(reaction == CpuReaction.Busy ? Mood.CpuBusy : Mood.CpuRelax);
+        return true;
+    }
+
+    public void EndCpuReaction()
+    {
+        if (Mood is Mood.CpuBusy or Mood.CpuRelax) Enter(IsFocusing ? Mood.Focus : Mood.Idle);
     }
 
     public void ApproachFriend(double x)

@@ -42,6 +42,11 @@ internal sealed class CompanionHost : IDisposable
     private Func<PointD?> readPointer = Native.ReadCursor;
     private bool inputUnavailable, displayRefreshPending;
     private bool DesktopBlocked => locked || suspended || inputUnavailable;
+    private readonly CpuActivity cpuActivity = new();
+    private Func<CpuTimes> readCpuTimes = Native.ReadCpuTimes;
+    private double nextCpuRead;
+    private bool cpuReadFailed;
+    private int cpuResident;
 
     public CompanionHost(string[] args)
     {
@@ -106,6 +111,7 @@ internal sealed class CompanionHost : IDisposable
                     await RunFriendsSmoke(output);
                     await RunSessionSmoke(output);
                     RunPersonalitySmoke(output);
+                    await RunCpuSmoke(output);
                     Application.Current.Shutdown(0);
                 }
                 catch (Exception ex)
@@ -147,6 +153,7 @@ internal sealed class CompanionHost : IDisposable
 
     private void SyncFriends(bool gather)
     {
+        ResetCpu();
         social.Cancel();
         bubble.Hide();
         menuBot = bot;
@@ -194,6 +201,7 @@ internal sealed class CompanionHost : IDisposable
 
     private void HideResidents()
     {
+        ResetCpu();
         social.Cancel();
         bubble.Hide();
         foreach (var resident in residents)
@@ -236,6 +244,7 @@ internal sealed class CompanionHost : IDisposable
     private void RecoverDisplays()
     {
         if (DesktopBlocked) { displayRefreshPending = true; return; }
+        ResetCpu();
         displayRefreshPending = false;
         displays = Native.Displays();
         social.Cancel();
@@ -312,6 +321,9 @@ internal sealed class CompanionHost : IDisposable
             companion.Paused = paused;
             if (!invisible) resident.Overlay.RenderPosition();
         }
+        UpdateCpu(now, invisible || busy || now < interactionUntil || bubble.IsVisible ||
+            tray.ContextMenuStrip?.Visible == true || preferences is not null ||
+            residents.Any(r => r.Bot.IsFocusing || r.Bot.Paused || r.Bot.ReducedMotion));
         if (bubble.IsVisible && now >= bubbleUntil) bubble.Hide();
         var animated = residents.Any(r => r.Bot.Mood is not (Mood.Idle or Mood.Sleep or Mood.Sit or Mood.Focus));
         timer.Interval = TimeSpan.FromMilliseconds(hidden || fullscreen || DesktopBlocked ? 250 :
@@ -320,6 +332,7 @@ internal sealed class CompanionHost : IDisposable
 
     private void TickWithoutDesktop(double elapsed)
     {
+        ResetCpu();
         foreach (var resident in residents)
         {
             var paused = resident.Bot.Paused;
@@ -328,6 +341,49 @@ internal sealed class CompanionHost : IDisposable
             resident.Bot.Paused = paused;
         }
         timer.Interval = TimeSpan.FromMilliseconds(250);
+    }
+
+    private void ResetCpu()
+    {
+        cpuActivity.Reset(preserveCooldown: true);
+        nextCpuRead = clock.Elapsed.TotalSeconds + 2;
+        foreach (var resident in residents) resident.Bot.EndCpuReaction();
+    }
+
+    private void UpdateCpu(double now, bool blocked)
+    {
+        if (!settings.CpuReactions || settings.Activity == ActivityLevel.Quiet || blocked)
+        {
+            ResetCpu();
+            return;
+        }
+        if (now < nextCpuRead) return;
+        nextCpuRead = now + 2;
+        CpuTimes times;
+        try
+        {
+            times = readCpuTimes();
+            cpuReadFailed = false;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            ResetCpu();
+            nextCpuRead = now + 30;
+            Storage.Log(ex);
+            if (!cpuReadFailed && !smoke)
+                tray.ShowBalloonTip(5000, "CPU reactions temporarily unavailable", ex.Message, Forms.ToolTipIcon.Warning);
+            cpuReadFailed = true;
+            return;
+        }
+        var reaction = cpuActivity.Sample(times, now);
+        if (!reaction.HasValue) return;
+        for (var i = 0; i < residents.Count; i++)
+        {
+            var index = (cpuResident + i) % residents.Count;
+            if (!residents[index].Bot.ReactToCpu(reaction.Value)) continue;
+            cpuResident = (index + 1) % residents.Count;
+            break;
+        }
     }
 
     private void ToggleMenu(Companion companion)
@@ -598,6 +654,112 @@ internal sealed class CompanionHost : IDisposable
         preferences.Show();
     }
 
+    private async Task RunCpuSmoke(string output)
+    {
+        var checks = new List<string>();
+        void Check(bool valid, string label)
+        {
+            if (!valid) throw new InvalidOperationException("CPU smoke check failed: " + label);
+            checks.Add(label);
+        }
+        var reader = readCpuTimes;
+        var enabled = settings.CpuReactions;
+        try
+        {
+            var live = new CpuActivity();
+            live.Sample(Native.ReadCpuTimes(), 0);
+            await Task.Delay(2100);
+            live.Sample(Native.ReadCpuTimes(), 2.1);
+            Check(live.UsagePercent is >= 0 and <= 100,
+                "Real Windows aggregate CPU counters produce a valid load percentage");
+            settings.FriendsTogether = true;
+            SyncFriends(true);
+            foreach (var resident in residents)
+            {
+                resident.Bot.Paused = false;
+                resident.Bot.ReducedMotion = false;
+                if (resident.Bot.IsFocusing) resident.Bot.StopFocus();
+                resident.Bot.Act(Mood.Idle);
+            }
+            settings.Activity = ActivityLevel.Balanced;
+            settings.CpuReactions = false;
+            var calls = 0;
+            ulong kernel = 0, idle = 0, user = 0;
+            readCpuTimes = () => { calls++; kernel += 60; user += 40; idle += 10; return new(idle, kernel, user); };
+            var now = clock.Elapsed.TotalSeconds + 10;
+            UpdateCpu(now, false);
+            Check(calls == 0, "Disabled CPU option performs zero native CPU reads");
+            settings.CpuReactions = true;
+            ResetCpu();
+            now += 10;
+            UpdateCpu(now, false);
+            UpdateCpu(now + .2, false);
+            Check(calls == 1, "CPU sampler is limited to once every two seconds");
+            var revision = memory.Revision;
+            for (var i = 1; i <= 3; i++) UpdateCpu(now + i * 2, false);
+            Check(residents.Count(r => r.Bot.Mood == Mood.CpuBusy) == 1,
+                "Sustained high CPU load animates one friend, not the whole desktop");
+            Check(memory.Revision == revision && !bubble.IsVisible,
+                "CPU reaction creates no stored usage history or unsolicited speech bubble");
+            var foreground = Native.GetForegroundWindow();
+            foreach (var resident in residents) resident.Overlay.RenderPosition();
+            Check(Native.GetForegroundWindow() == foreground, "Native CPU reaction rendering does not take focus");
+            var art = residents.First(r => r.Bot.Mood == Mood.CpuBusy).Overlay.Character;
+            Check(art.Interactive(new Point(137, 151)) && !art.Interactive(new Point(150, 5)),
+                "CPU prop is clickable while transparent sprite padding remains pass-through");
+            art.UpdateLayout();
+            var image = new System.Windows.Media.Imaging.RenderTargetBitmap(154, 170, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            image.Render(art);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(image));
+            using (var file = System.IO.File.Create(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(output)!, "Byte-cpu.png"))) encoder.Save(file);
+            var before = calls;
+            UpdateCpu(now + 8, true);
+            Check(calls == before && residents.All(r => r.Bot.Mood != Mood.CpuBusy),
+                "Busy/fullscreen/paused CPU gate stops reads and cancels the CPU pose");
+            UpdateCpu(now + 10, false);
+            Check(!cpuActivity.UsagePercent.HasValue && residents.All(r => r.Bot.Mood != Mood.CpuBusy),
+                "After suspension a fresh baseline prevents replaying stale CPU load");
+            settings.CpuReactions = false;
+            UpdateCpu(now + 12, false);
+            Check(calls == before + 1 && cpuActivity.UsagePercent is null,
+                "Turning CPU reactions off clears readings and stops sampling immediately");
+            settings.CpuReactions = true;
+            ResetCpu();
+            readCpuTimes = () => throw new System.ComponentModel.Win32Exception(5, "Injected CPU read failure");
+            UpdateCpu(now + 20, false);
+            Check(cpuReadFailed && cpuActivity.UsagePercent is null && nextCpuRead == now + 50,
+                "Unavailable native CPU sampling is reported and backs off rather than crashing");
+            readCpuTimes = reader;
+            UpdateCpu(now + 50, false);
+            Check(!cpuReadFailed, "CPU sampler recovers after a temporary native error");
+            var storeFolder = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(output)!, "cpu-settings-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new Storage(storeFolder);
+                store.Save(new Settings { CpuReactions = true });
+                Check(store.Load().CpuReactions, "Opt-in CPU preference round-trips through real local settings storage");
+            }
+            finally
+            {
+                System.IO.File.Delete(System.IO.Path.Combine(storeFolder, "settings.json"));
+                System.IO.Directory.Delete(storeFolder);
+            }
+            var report = JsonNode.Parse(System.IO.File.ReadAllText(output))!.AsObject();
+            foreach (var check in checks) report["checks"]!.AsArray().Add(check);
+            report["cpuAggregateSamplingVerified"] = true;
+            System.IO.File.WriteAllText(output,
+                report.ToJsonString(new JsonSerializerOptions(JsonSerializerOptions.Default) { WriteIndented = true }));
+        }
+        finally
+        {
+            settings.CpuReactions = enabled;
+            readCpuTimes = reader;
+            cpuReadFailed = false;
+            ResetCpu();
+        }
+    }
+
     private void RunPersonalitySmoke(string output)
     {
         var checks = new List<string>();
@@ -802,6 +964,11 @@ internal sealed class CompanionHost : IDisposable
             Persist(() => settings.AutoInteractions = !settings.AutoInteractions);
             if (!settings.AutoInteractions) social.Cancel();
         }, settings.AutoInteractions);
+        Add("React to CPU usage (opt-in)", () =>
+        {
+            Persist(() => settings.CpuReactions = !settings.CpuReactions);
+            ResetCpu();
+        }, settings.CpuReactions);
         menu.Items.Add(new Forms.ToolStripSeparator());
         foreach (var level in Enum.GetValues<ActivityLevel>())
             Add(level.ToString(), () => Persist(() => settings.Activity = level), settings.Activity == level);

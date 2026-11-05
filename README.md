@@ -59,6 +59,30 @@ never an unsolicited notification. **Preferences → Forget character memories**
 resets every character's recent activity/joke memory and friendships after
 confirmation, without changing settings or the running focus timer.
 
+## Optional CPU reactions
+
+Enable **React to CPU usage (opt-in)** in the tray menu or Preferences. It is
+off by default, including for existing installations. While enabled and Byte
+is available for play, it reads only aggregate Windows CPU time counters
+every two seconds, never process names or what you are working on.
+
+Three consecutive readings at **75% or higher** can give one available friend
+a four-second busy expression and a tiny animated CPU prop. Three consecutive
+readings at **40% or lower** can earn a quiet, relieved stretch. Reactions are
+limited to once per minute; changes during that cooldown are skipped, not
+queued. Sustained load does not keep repeating the animation, and friends
+take turns in together mode. There is no automatic sound, speech or notification
+about CPU load.
+
+CPU reactions never interrupt naps, dragging, jumping, explicit interactions
+or friend scenes. Sampling and CPU poses stop during pointer activity, Focus,
+Quiet, pause, reduced motion, open menus/preferences, manual hiding, fullscreen
+hiding, lock and sleep. Returning starts a fresh counter baseline, without
+replaying old load changes. Disabling the option stops reads and clears the
+temporary reading immediately. No CPU values or usage history are saved.
+If Windows cannot read counters, Byte reports the error and retries after
+30 seconds rather than crashing.
+
 ## Run
 
 Windows 11 x64. Extract **Byte-win-x64.zip** and run **Byte.exe**, or run
@@ -127,6 +151,9 @@ animation preferences, the pointer position and left mouse-button state, and
 the foreground window's bounds/class solely for fullscreen hiding. Two hotkeys
 are registered through Windows `RegisterHotKey`; there is no key-event stream.
 Future app-aware integrations would need separate opt-in permission UI.
+The optional CPU reaction feature reads aggregate idle/kernel/user counters
+through `GetSystemTimes` only when explicitly enabled; it does not enumerate
+processes, inspect application activity or persist those measurements.
 
 Settings: `%LOCALAPPDATA%\Byte\settings.json`.
 Character memory: `%LOCALAPPDATA%\Byte\personality.json` (three bounded
@@ -158,6 +185,7 @@ shipping a web runtime and lets the idle character use a small native overlay.
 - `Byte.Core`: platform-independent geometry, settings, physics, behavior and
   bounded pairwise social choreography (`SocialBehavior.cs`); identity memory,
   personality preferences and nonrepetition live in `PersonalityMemory.cs`.
+  Aggregate CPU counter math, hysteresis and cooldown live in `CpuActivity.cs`.
 - `Byte.App\Character.cs`: original artwork and pose animation only.
 - `Byte.App\Native.cs`, `Overlay.cs`: native integration and pointer interaction.
 - `Byte.App\CompanionHost.cs`: app lifecycle, tray, timing, and orchestration.
@@ -201,6 +229,11 @@ joke-deck persistence, friendship progression and scene cancellation, quiet
 contextual reactions, on-demand status, atomic local storage, and explicit
 reset/corrupt-file recovery. Native smoke uses isolated memory and temporary
 storage; it never changes your characters' real saved memories.
+CPU regressions verify real native counter sampling without deliberately
+loading the machine, counter deltas/rollbacks, exact thresholds, cooldown,
+opt-in persistence, interrupted sampling, quiet poses and no focus theft.
+`artifacts\Byte-cpu.png` is an offscreen render of Byte's own CPU reaction,
+not a screen capture.
 
 **Hardware validation still required:** physically plug/unplug monitors during
 travel; change scaling while dragging; sleep/resume; lock/unlock; exercise
